@@ -1,0 +1,189 @@
+'use client';
+
+import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { AppBar } from '@/components/chrome';
+import { MoneyRow } from '@/components/money';
+import { api } from '@/lib/client-api';
+import { PARAMS, piToMicro, bondFor, microToPi } from '@/lib/escrow';
+import { Shield, Truck, Clock, Info } from '@/components/icons';
+
+const SHIP_OPTIONS = [
+  { label: '24 hours', s: 24 * 3600 },
+  { label: '3 days', s: 72 * 3600 },
+  { label: '7 days', s: 7 * 24 * 3600 },
+  { label: '14 days', s: 14 * 24 * 3600 },
+];
+const INSPECT_OPTIONS = [
+  { label: '24 hours', s: 24 * 3600 },
+  { label: '3 days', s: 72 * 3600 },
+  { label: '7 days', s: 7 * 24 * 3600 },
+];
+
+export default function CreatePage() {
+  const router = useRouter();
+  const [amount, setAmount] = useState('');
+  const [memo, setMemo] = useState('');
+  const [shipWindowS, setShip] = useState(PARAMS.SHIP_DEFAULT_S);
+  const [inspectWindowS, setInspect] = useState(PARAMS.INSPECT_DEFAULT_S);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const amountNum = parseFloat(amount);
+  const valid =
+    !Number.isNaN(amountNum) &&
+    amountNum >= microToPi(PARAMS.AMOUNT_FLOOR) &&
+    amountNum <= microToPi(PARAMS.AMOUNT_CAP) &&
+    memo.trim().length >= 3;
+
+  const sellerBond = useMemo(() => {
+    if (Number.isNaN(amountNum) || amountNum <= 0) return 0n;
+    return bondFor(piToMicro(amountNum));
+  }, [amountNum]);
+
+  async function submit() {
+    if (!valid) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const trade = await api.createTrade({
+        amount: amountNum,
+        shipWindowS,
+        inspectWindowS,
+        memo: memo.trim(),
+      });
+      router.push(`/trade/${trade.id}?created=1`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not create the trade.');
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col min-h-[100dvh]">
+      <AppBar title="Create a safe trade" back />
+
+      <main className="px-5 pt-5 pb-40 space-y-7">
+        {/* Amount */}
+        <div>
+          <label className="label">Amount</label>
+          <div className="relative">
+            <input
+              inputMode="decimal"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+              placeholder="0"
+              className="field h-16 text-3xl font-display font-semibold tnum pr-12"
+            />
+            <span className="absolute right-4 top-1/2 -translate-y-1/2 font-display text-2xl text-muted">π</span>
+          </div>
+          <p className="mt-2 text-[12px] text-faint">
+            Between {microToPi(PARAMS.AMOUNT_FLOOR)} and {microToPi(PARAMS.AMOUNT_CAP)} Pi at launch.
+          </p>
+        </div>
+
+        {/* Description */}
+        <div>
+          <label className="label">What are you selling?</label>
+          <input
+            value={memo}
+            onChange={(e) => setMemo(e.target.value.slice(0, 140))}
+            placeholder="e.g. Hand-woven Aso-Oke fabric, 2 yards"
+            className="field"
+          />
+          <p className="mt-2 text-[12px] text-faint">{memo.length}/140 — shown to the buyer before they pay.</p>
+        </div>
+
+        {/* Ship window */}
+        <WindowPicker
+          icon={<Truck width={18} height={18} />}
+          label="Ship within"
+          help="How long you have to send the item after the buyer pays."
+          options={SHIP_OPTIONS}
+          value={shipWindowS}
+          onChange={setShip}
+        />
+
+        {/* Inspect window */}
+        <WindowPicker
+          icon={<Clock width={18} height={18} />}
+          label="Buyer inspects within"
+          help="After you ship, how long the buyer has to confirm or dispute. Silence releases payment to you."
+          options={INSPECT_OPTIONS}
+          value={inspectWindowS}
+          onChange={setInspect}
+        />
+
+        {/* Bond explainer */}
+        <div className="card p-4 bg-brand-soft ring-brand/15">
+          <div className="flex gap-3">
+            <Shield width={20} height={20} className="text-brand-dark shrink-0 mt-0.5" />
+            <div className="text-[13px] leading-relaxed text-slate">
+              <span className="font-semibold text-brand-dark">You both put down a good-faith bond.</span>{' '}
+              You lock a {Number(PARAMS.BOND_PCT)}% seller bond (min {microToPi(PARAMS.BOND_FLOOR)} Pi) when you create this trade.
+              It comes back in full when the trade completes — it only ever matters if you walk away.
+            </div>
+          </div>
+        </div>
+
+        {amount && (
+          <div className="card p-4 animate-fade-up">
+            <MoneyRow label="Sale price" micro={piToMicro(amountNum || 0)} />
+            <div className="hr" />
+            <MoneyRow label="Your seller bond" micro={sellerBond} sub="Refunded on completion" />
+            <div className="hr" />
+            <MoneyRow label="You lock now" micro={sellerBond} emphasis sub="Only the bond — the buyer locks the price" />
+          </div>
+        )}
+
+        {err && <p className="text-[14px] text-danger">{err}</p>}
+      </main>
+
+      <div className="sticky bottom-0 px-5 pt-4 pb-[max(env(safe-area-inset-bottom),18px)] bg-paper/92 backdrop-blur-md">
+        <div className="hr mb-4" />
+        <button onClick={submit} disabled={!valid || busy} className="btn-primary w-full">
+          {busy ? 'Creating…' : 'Create trade & get link'}
+        </button>
+        <p className="mt-2.5 flex items-center justify-center gap-1.5 text-[12px] text-faint">
+          <Info width={13} height={13} /> A 1.5% fee applies only when a sale completes.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function WindowPicker({
+  icon, label, help, options, value, onChange,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  help: string;
+  options: { label: string; s: number }[];
+  value: number;
+  onChange: (s: number) => void;
+}) {
+  return (
+    <div>
+      <label className="label flex items-center gap-1.5">{icon} {label}</label>
+      <div className="grid grid-cols-4 gap-2">
+        {options.map((o) => {
+          const active = o.s === value;
+          return (
+            <button
+              key={o.s}
+              onClick={() => onChange(o.s)}
+              className={`h-11 rounded-xl text-[13px] font-semibold transition ring-1 ${
+                active
+                  ? 'bg-sink text-white ring-sink'
+                  : 'bg-surface text-muted ring-line active:scale-95'
+              }`}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-[12px] text-faint">{help}</p>
+    </div>
+  );
+}

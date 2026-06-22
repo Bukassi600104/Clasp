@@ -1,0 +1,71 @@
+import 'server-only';
+import type {
+  Trade, TradeEvent, SettlementProposal, Evidence, AppNotification, Profile,
+  Partner, WebhookDelivery,
+} from '../types';
+import { firebaseConfigured } from '../firebase';
+import { MemoryRepo } from './memory-repo';
+import { FirestoreRepo } from './firestore-repo';
+
+/**
+ * Persistence interface. Two implementations:
+ *  - FirestoreRepo  (production / emulator)
+ *  - MemoryRepo     (no-config fallback, also the unit-test backend)
+ *
+ * The transition logic in lib/store.ts is backend-agnostic — it only talks to
+ * this interface, so the escrow rules are identical regardless of where data lives.
+ */
+export interface Repo {
+  // users / profiles
+  upsertUser(uid: string, username: string): Promise<Profile>;
+  getProfile(uid: string): Promise<Profile | null>;
+  saveProfile(p: Profile): Promise<void>;
+
+  // trades
+  insertTrade(t: Trade): Promise<void>;
+  getTrade(id: string): Promise<Trade | null>;
+  saveTrade(t: Trade): Promise<void>;
+  getTradeByRef(partnerId: string | null, ref: string): Promise<Trade | null>;
+  getTradeByIdempotency(partnerId: string | null, key: string): Promise<Trade | null>;
+  listTradesForUser(uid: string): Promise<Trade[]>;
+  listActiveTrades(): Promise<Trade[]>;
+
+  // events
+  addEvent(e: TradeEvent): Promise<void>;
+  listEvents(tradeId: string): Promise<TradeEvent[]>;
+
+  // settlement proposals
+  addProposal(p: SettlementProposal): Promise<void>;
+  saveProposal(p: SettlementProposal): Promise<void>;
+  listProposals(tradeId: string): Promise<SettlementProposal[]>;
+
+  // evidence
+  addEvidence(e: Evidence): Promise<void>;
+  listEvidence(tradeId: string): Promise<Evidence[]>;
+
+  // notifications
+  addNotification(n: AppNotification): Promise<void>;
+  listNotifications(uid: string): Promise<AppNotification[]>;
+  markNotificationsRead(uid: string): Promise<void>;
+
+  // partners + webhooks (public API)
+  insertPartner(p: Partner): Promise<void>;
+  getPartner(id: string): Promise<Partner | null>;
+  getPartnerByKeyHash(hash: string): Promise<Partner | null>;
+  addWebhookDelivery(d: WebhookDelivery): Promise<void>;
+  saveWebhookDelivery(d: WebhookDelivery): Promise<void>;
+  listDueWebhookDeliveries(): Promise<WebhookDelivery[]>;
+}
+
+let _repo: Repo | null = null;
+
+export function repo(): Repo {
+  if (!_repo) {
+    _repo = firebaseConfigured() ? new FirestoreRepo() : new MemoryRepo();
+  }
+  return _repo;
+}
+
+export function backendName(): 'firestore' | 'memory' {
+  return firebaseConfigured() ? 'firestore' : 'memory';
+}

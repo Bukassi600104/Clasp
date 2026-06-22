@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  html {
+    -webkit-tap-highlight-color: transparent;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    @apply bg-paper text-ink font-sans antialiased;
+    overscroll-behavior-y: none;
+  }
+  /* Numeric tabular alignment for all amounts */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+  }
+}
+
+@layer components {
+  /* App shell — phone-width column centered on larger screens */
+  .shell {
+    @apply mx-auto w-full max-w-app min-h-[100dvh] bg-paper relative;
+  }
+
+  /* Primary action — solid emerald, no gradient */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl px-5 h-12
+           text-[15px] font-semibold tracking-tight transition-all duration-150
+           active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none
+           select-none;
+  }
+  .btn-primary {
+    @apply btn bg-brand text-white shadow-card hover:bg-brand-dark;
+  }
+  .btn-dark {
+    @apply btn bg-sink text-white hover:bg-ink;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent text-ink ring-1 ring-line hover:bg-slate-soft;
+  }
+  .btn-danger {
+    @apply btn bg-danger text-white hover:brightness-95;
+  }
+  .btn-sm {
+    @apply h-10 px-4 text-sm rounded-xl;
+  }
+
+  .card {
+    @apply bg-surface rounded-2xl shadow-card ring-1 ring-line/70;
+  }
+
+  .field {
+    @apply w-full h-12 rounded-xl bg-surface ring-1 ring-line px-4 text-[15px]
+           text-ink placeholder:text-faint outline-none transition
+           focus:ring-2 focus:ring-brand;
+  }
+  .label {
+    @apply text-[13px] font-semibold text-muted mb-1.5 block;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1
+           text-[12px] font-semibold tracking-tight;
+  }
+
+  /* Hairline divider */
+  .hr {
+    @apply h-px bg-line;
+  }
+}
+
+/* Hide scrollbars on horizontal rails while keeping scroll */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

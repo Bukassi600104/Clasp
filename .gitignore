@@ -1,0 +1,31 @@
+/node_modules
+/.next
+/out
+/build
+.env
+.env*.local
+.vercel
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
+
+# Firebase emulator
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+.firebase/
+prod.log
+prod-fs.log
+emulator.log
+
+# Rust / Soroban contract build artifacts
+/contract/target
+
+.vercel
+
+# Dev tooling / safety
+.claude/
+*.log
+clasp-*-firebase-adminsdk-*.json
+serviceAccount*.json
+*.tar.gz
