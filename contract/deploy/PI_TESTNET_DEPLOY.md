@@ -68,5 +68,11 @@ vercel env add PI_TOKEN_SAC production                   # CDG6ZM2S…LEXQ
 vercel deploy --prod --yes
 ```
 
-`lib/chain.ts` activates once `NEXT_PUBLIC_CONTRACT_ADDRESS` is set, routing the
-fund/release flow through the on-chain contract instead of the Pi-SDK bridge.
+> ⚠️ **This does not make the app non-custodial yet.** Setting
+> `NEXT_PUBLIC_CONTRACT_ADDRESS` only flips `contractConfigured()` and lets the
+> backend *read* contract state. The *write* path (buyers/sellers signing escrow
+> calls) requires the Pi Wallet to sign a Soroban `InvokeHostFunction` — and the
+> public Pi JS SDK has **no method for that** (only `createPayment`, which signs a
+> payment). Until Pi ships wallet-signed contract invocation, the live app stays
+> on the custodial Pi-SDK payment bridge. Deploying the contract here proves the
+> bytecode runs on Pi; it does not wire user funds through it.

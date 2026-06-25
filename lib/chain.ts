@@ -1,24 +1,24 @@
 import 'server-only';
 
 /**
- * Chain seam — the single boundary between the app and the on-chain Soroban
+ * Chain seam — the intended boundary between the app and the on-chain Soroban
  * escrow contract (see `contract/`). Today `lib/store.ts` is the source of trade
- * state (the in-process engine that mirrors the contract). When the contract is
- * deployed to Pi mainnet, this module becomes the integration point and the
- * data flow inverts to the PRD §7 architecture:
+ * state (the in-process engine that mirrors the contract), and funds move through
+ * the custodial Pi payment bridge (`Pi.createPayment`), NOT through a contract.
  *
- *   WRITES  — user-signed contract calls. The reference app builds the operation
- *             and the **Pi Wallet signs it** client-side (lib/pi-client.ts). The
- *             backend never holds keys and never moves funds.
+ * KNOWN BLOCKER (verified against pi-apps/pi-platform-docs SDK_reference.md):
+ * the WRITES path below assumes the Pi Wallet can sign a contract invocation
+ * client-side. The public Pi JS SDK exposes no such method — only
+ * `authenticate` / `createPayment` (payments) / share / ads. So this seam cannot
+ * be activated for end users until Pi ships wallet-signed contract calls. The
+ * code below is a descriptor builder only; it does not sign or submit anything.
+ *
+ *   WRITES  — (BLOCKED) would be user-signed contract calls.
  *   READS   — `get_trade` / `get_state` via Pi RPC (read-only simulation).
- *   INDEXER — a worker polls contract events (every transition emits one) and
- *             writes them into Firestore via the same repository the engine uses,
- *             so the API and UI are unchanged. Webhooks fire from the indexer
- *             AFTER on-chain confirmation, never from optimistic state (§9).
+ *   INDEXER — a worker polls contract events and mirrors them into Firestore.
  *
  * Until `NEXT_PUBLIC_CONTRACT_ADDRESS` is set, `contractConfigured()` is false
- * and `lib/store.ts` runs the engine directly. This keeps the app fully
- * functional pre-mainnet and makes the cutover a config flip, not a rewrite.
+ * and `lib/store.ts` runs the engine directly.
  */
 
 export const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS ?? null;

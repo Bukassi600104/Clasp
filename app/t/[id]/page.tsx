@@ -103,7 +103,7 @@ export default function CheckoutPage() {
           </h1>
           <p className="mt-2 text-[15px] text-muted leading-relaxed">
             <span className="font-semibold text-ink">@{trade.seller_username}</span> wants{' '}
-            {formatPi(trade.amount_micro)} for this. Your money is locked by a contract —
+            {formatPi(trade.amount_micro)} for this. Clasp holds your payment in escrow —
             they <span className="font-semibold text-ink">cannot touch it</span> until you confirm delivery.
           </p>
         </div>
