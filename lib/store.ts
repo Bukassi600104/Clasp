@@ -3,8 +3,12 @@ import { randomUUID } from 'crypto';
 import {
   PARAMS, TradeState, bondFor, feeFor, isTerminal, microToPi,
 } from './escrow';
+import {
+  DEFAULT_LIMIT_MICRO, tierFor, effectiveLimitMicro, clampChosenLimit,
+} from './tiers';
 import type {
   Trade, TradeEvent, SettlementProposal, Evidence, AppNotification, Profile,
+  Rating, RatingSummary,
 } from './types';
 import { repo } from './db/repo';
 import { dispatchWebhook } from './webhooks';
@@ -64,10 +68,29 @@ const save = (t: Trade) => repo().saveTrade({ ...t, updated_at: iso(now()) });
 export const upsertUser = (uid: string, username: string) => repo().upsertUser(uid, username);
 export const getProfile = (uid: string) => repo().getProfile(uid);
 
+function ratingSummary(pos = 0, count = 0): RatingSummary {
+  return { positivePct: count > 0 ? Math.round((pos / count) * 100) : null, count };
+}
+
+/** A seller's chosen per-trade cap. undefined (legacy) → Starter default;
+ *  null → unlimited (Elite); string → that value. */
+function chosenLimitMicro(p: Profile): bigint | null {
+  const v = p.trade_limit_micro;
+  if (v === undefined) return DEFAULT_LIMIT_MICRO;
+  if (v === null) return null;
+  return BigInt(v);
+}
+
+/** Clean (never-disputed) completed trades where the user was the seller. */
+function sellerQualifying(trades: Trade[], uid: string): number {
+  return trades.filter((t) => t.seller_uid === uid && t.state === 'COMPLETED').length;
+}
+
 /**
- * Public trust stats for a user — the count of successful (completed + settled)
- * trades, shown to counterparties so a buyer can see a seller's track record.
- * Computed from the user's trades so it always reflects real terminal outcomes.
+ * Public trust stats for a user — successful (completed + settled) trade count,
+ * completion rate, earned tier, and mutual ratings — shown to counterparties so
+ * a buyer can gauge a seller's track record (and vice versa). Always computed
+ * from real terminal outcomes so it can't be faked.
  */
 export async function getPublicStats(uid: string) {
   const profile = await repo().getProfile(uid);
@@ -82,6 +105,8 @@ export async function getPublicStats(uid: string) {
     else if (t.state === 'REFUNDED' || t.state === 'NUCLEAR') { fundedTerminal++; }
   }
   const successful = completed + settled;
+  const qualifying = sellerQualifying(trades, uid);
+  const tier = tierFor(qualifying);
   return {
     username: profile.username,
     successful,
@@ -89,8 +114,105 @@ export async function getPublicStats(uid: string) {
     settled,
     distinct_counterparties: profile.distinct_counterparties,
     completion_rate: fundedTerminal > 0 ? Math.round((successful / fundedTerminal) * 100) : null,
+    qualifying,
+    tier: {
+      id: tier.id, name: tier.name, tone: tier.tone,
+      ceiling_micro: tier.ceilingMicro === null ? null : tier.ceilingMicro.toString(),
+    },
+    seller_rating: ratingSummary(profile.seller_pos_count, profile.seller_rating_count),
+    buyer_rating: ratingSummary(profile.buyer_pos_count, profile.buyer_rating_count),
   };
 }
+
+/** Seller's qualifying count + effective per-trade cap — for create-time
+ *  enforcement and for the create screen to show the right ceiling. */
+export async function sellerLimitInfo(uid: string): Promise<{ qualifying: number; effectiveMicro: bigint | null }> {
+  const [trades, profile] = await Promise.all([
+    repo().listTradesForUser(uid),
+    repo().getProfile(uid),
+  ]);
+  const qualifying = sellerQualifying(trades, uid);
+  const chosen = profile ? chosenLimitMicro(profile) : DEFAULT_LIMIT_MICRO;
+  return { qualifying, effectiveMicro: effectiveLimitMicro(qualifying, chosen) };
+}
+
+/** Seller raises/lowers their per-trade cap (clamped to the earned ceiling). */
+export async function setSellerLimit(uid: string, pi: number | null): Promise<Profile> {
+  const [profile, trades] = await Promise.all([
+    repo().getProfile(uid),
+    repo().listTradesForUser(uid),
+  ]);
+  if (!profile) throw new TransitionError('Profile not found.');
+  const qualifying = sellerQualifying(trades, uid);
+  const clamped = clampChosenLimit(qualifying, pi);
+  profile.trade_limit_micro = clamped === null ? null : clamped.toString();
+  await repo().saveProfile(profile);
+  return profile;
+}
+
+/** Full self-view for the profile screen: stats, chosen + effective cap, reviews. */
+export async function getOwnProfileView(uid: string) {
+  const [stats, profile, reviews] = await Promise.all([
+    getPublicStats(uid),
+    repo().getProfile(uid),
+    repo().listRatingsAbout(uid),
+  ]);
+  if (!stats || !profile) return null;
+  const chosen = chosenLimitMicro(profile);
+  const effective = effectiveLimitMicro(stats.qualifying, chosen);
+  return {
+    stats,
+    chosen_limit_micro: chosen === null ? null : chosen.toString(),
+    effective_limit_micro: effective === null ? null : effective.toString(),
+    reviews: reviews.slice(0, 12),
+  };
+}
+
+/**
+ * Mutual rating — after a funded trade reaches a terminal outcome, each party
+ * may rate the other once (1–5 stars + optional comment). Aggregates land on the
+ * ratee's profile, split by the role they played (seller vs buyer reputation).
+ */
+export async function rateCounterparty(
+  tradeId: string, raterUid: string, raterUsername: string | null,
+  positive: boolean, comment: string | null,
+): Promise<Rating> {
+  const t = await getOrThrow(tradeId);
+  if (raterUid !== t.seller_uid && raterUid !== t.buyer_uid)
+    throw new TransitionError('Only a party to the trade can rate it.');
+  if (!t.buyer_uid) throw new TransitionError('This trade had no counterparty to rate.');
+  if (!isTerminal(t.state)) throw new TransitionError('You can rate once the trade is complete.');
+  if (typeof positive !== 'boolean') throw new TransitionError('Feedback must be positive or negative.');
+  const existing = await repo().getRatingByRater(tradeId, raterUid);
+  if (existing) throw new TransitionError('You already rated this trade.');
+
+  const rateeUid = raterUid === t.seller_uid ? t.buyer_uid : t.seller_uid;
+  const rateeRole: 'seller' | 'buyer' = rateeUid === t.seller_uid ? 'seller' : 'buyer';
+  const clean = comment && comment.trim() ? comment.trim().slice(0, 280) : null;
+  const rating: Rating = {
+    id: randomUUID(), trade_id: tradeId, rater_uid: raterUid, rater_username: raterUsername,
+    ratee_uid: rateeUid, ratee_role: rateeRole, positive, comment: clean, created_at: iso(now()),
+  };
+  await repo().addRating(rating);
+
+  const rp = await repo().getProfile(rateeUid);
+  if (rp) {
+    if (rateeRole === 'seller') {
+      rp.seller_pos_count = (rp.seller_pos_count ?? 0) + (positive ? 1 : 0);
+      rp.seller_rating_count = (rp.seller_rating_count ?? 0) + 1;
+    } else {
+      rp.buyer_pos_count = (rp.buyer_pos_count ?? 0) + (positive ? 1 : 0);
+      rp.buyer_rating_count = (rp.buyer_rating_count ?? 0) + 1;
+    }
+    await repo().saveProfile(rp);
+  }
+  await notify(rateeUid, t, 'rated', 'You received feedback',
+    `${raterUsername ?? 'Your counterparty'} left ${positive ? '👍 positive' : '👎 negative'} feedback${clean ? ` — “${clean}”` : ''}.`);
+  return rating;
+}
+
+export const getRatingsForTrade = (tradeId: string) => repo().listRatingsForTrade(tradeId);
+export const getRatingsAbout = (uid: string) => repo().listRatingsAbout(uid);
 export const getEvents = (tradeId: string) => repo().listEvents(tradeId);
 export const getProposals = (tradeId: string) => repo().listProposals(tradeId);
 export const getEvidence = (tradeId: string) => repo().listEvidence(tradeId);
@@ -213,6 +335,7 @@ export async function openDispute(id: string, buyerUid: string): Promise<Trade> 
   if (buyerUid !== t.buyer_uid) throw new TransitionError('Only the buyer can open a dispute.');
   if (passed(t.inspect_deadline)) throw new TransitionError('The inspection window has closed.');
   t.state = 'DISPUTED';
+  t.disputed = true; // permanently excludes this trade from the seller's clean count
   t.settlement_deadline = plus(PARAMS.SETTLEMENT_WINDOW_S);
   await save(t);
   const sp = await repo().getProfile(t.seller_uid);
@@ -405,6 +528,9 @@ export async function seedDemo(uid: string, username: string) {
   await fundTrade(t4.id, 'pi_demo_ngozi', 'ngozi_buys', 'demo-tx-4');
   await markShipped(t4.id, uid, 'demo-evidence-4');
   await confirmReceipt(t4.id, 'pi_demo_ngozi');
+  // Mutual feedback on the completed trade, so the reputation UI has content.
+  await rateCounterparty(t4.id, 'pi_demo_ngozi', 'ngozi_buys', true, 'Fast shipping, exactly as described!');
+  await rateCounterparty(t4.id, uid, username, true, 'Smooth buyer, paid right away.');
 }
 
 // Re-export Profile for convenience

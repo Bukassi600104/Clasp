@@ -1,6 +1,6 @@
 'use client';
 
-import type { Trade, TradeEvent, SettlementProposal, Evidence, AppNotification, PublicStats } from './types';
+import type { Trade, TradeEvent, SettlementProposal, Evidence, AppNotification, PublicStats, Rating } from './types';
 
 export interface TradeDetail {
   trade: Trade;
@@ -9,6 +9,14 @@ export interface TradeDetail {
   evidence: Evidence[];
   sellerStats: PublicStats | null;
   buyerStats: PublicStats | null;
+  ratings: Rating[];
+}
+
+export interface OwnProfileView {
+  stats: PublicStats;
+  chosen_limit_micro: string | null;
+  effective_limit_micro: string | null;
+  reviews: Rating[];
 }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -64,6 +72,17 @@ export const api = {
   cancel: (id: string) => call<Trade>(`/api/trades/${id}/cancel`, { method: 'POST' }),
 
   timeout: (id: string) => call<Trade>(`/api/trades/${id}/timeout`, { method: 'POST' }),
+
+  rate: (id: string, positive: boolean, comment?: string) =>
+    call<Rating>(`/api/trades/${id}/rate`, {
+      method: 'POST',
+      body: JSON.stringify({ positive, comment }),
+    }),
+
+  profile: () => call<OwnProfileView>('/api/profile'),
+
+  setLimit: (limitPi: number | null) =>
+    call<OwnProfileView>('/api/profile', { method: 'POST', body: JSON.stringify({ limitPi }) }),
 
   notifications: () => call<AppNotification[]>('/api/notifications'),
   markRead: () => call<{ read: boolean }>('/api/notifications', { method: 'POST' }),

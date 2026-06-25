@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { requireSession } from '@/lib/session';
-import { createTrade, listTradesFor, getTradeByRef, findByIdempotency } from '@/lib/store';
+import { createTrade, listTradesFor, getTradeByRef, findByIdempotency, sellerLimitInfo } from '@/lib/store';
 import { piToMicro, validateCreate, PARAMS } from '@/lib/escrow';
 import { handler, ok, fail, limited } from '@/lib/api';
 
@@ -24,10 +24,13 @@ export const POST = handler(async (req: NextRequest) => {
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? 'Invalid trade details.');
 
   const amountMicro = piToMicro(parsed.data.amount);
+  // Per-seller tier cap (replaces the old flat 50π launch cap).
+  const { effectiveMicro } = await sellerLimitInfo(session.uid);
   const err = validateCreate({
     amountMicro,
     shipWindowS: parsed.data.shipWindowS,
     inspectWindowS: parsed.data.inspectWindowS,
+    maxAmountMicro: effectiveMicro,
   });
   if (err) return fail(err);
 

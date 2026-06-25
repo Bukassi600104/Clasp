@@ -176,6 +176,35 @@ export const Activity = (p: P) => (
   </svg>
 );
 
+export const ThumbsUp = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M7 10.5V20H4.5a1 1 0 0 1-1-1v-7.5a1 1 0 0 1 1-1H7z" />
+    <path d="M7 10.5l4-6.5a2 2 0 0 1 2 1.8V9h5a1.8 1.8 0 0 1 1.8 2.2l-1.3 6A2 2 0 0 1 16.6 19H7" />
+  </svg>
+);
+
+export const ThumbsDown = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M17 13.5V4h2.5a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1H17z" />
+    <path d="M17 13.5l-4 6.5a2 2 0 0 1-2-1.8V15H6a1.8 1.8 0 0 1-1.8-2.2l1.3-6A2 2 0 0 1 7.4 5H17" />
+  </svg>
+);
+
+export const TrendingUp = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M3 17l6-6 4 4 8-8M15 7h6v6" />
+  </svg>
+);
+
+export const Sliders = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M18 18h2" />
+    <circle cx="16" cy="6" r="2" />
+    <circle cx="10" cy="12" r="2" />
+    <circle cx="16" cy="18" r="2" />
+  </svg>
+);
+
 export const PiSymbol = (p: P) => (
   <svg {...base(p)}>
     <path d="M5 8h14M8 8v9M16 8v7a1.5 1.5 0 0 0 3 0" />

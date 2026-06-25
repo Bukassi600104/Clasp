@@ -43,10 +43,12 @@ OK=$(act seller_guard $SELF fund | python -c "import sys,json;print(json.load(sy
 check "seller cannot fund own trade" "$OK" False
 
 echo ""
-echo "=== AMOUNT BOUNDS ==="
+echo "=== AMOUNT BOUNDS (Starter tier = 100 Pi cap) ==="
 login bound_test
-OK=$(mk bound_test "toobig" 60 | python -c "import sys,json;print(json.load(sys.stdin)['ok'])")
-check "over 50 Pi cap rejected" "$OK" False
+OK=$(mk bound_test "withincap" 60 | python -c "import sys,json;print(json.load(sys.stdin)['ok'])")
+check "60 Pi within new Starter cap" "$OK" True
+OK=$(mk bound_test "toobig" 120 | python -c "import sys,json;print(json.load(sys.stdin)['ok'])")
+check "over 100 Pi Starter cap rejected" "$OK" False
 OK=$(mk bound_test "small" 0.5 | python -c "import sys,json;print(json.load(sys.stdin)['ok'])")
 check "under 1 Pi floor rejected" "$OK" False
 

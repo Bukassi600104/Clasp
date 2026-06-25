@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/app/providers';
 import { api } from '@/lib/client-api';
-import type { Trade, TradeEvent, PublicStats } from '@/lib/types';
+import type { Trade, TradeEvent, PublicStats, Rating } from '@/lib/types';
 import {
   isTerminal, bondFor, buyerLockTotal, completedPayout, refundedPayout, nuclearPayout,
 } from '@/lib/escrow';
@@ -18,7 +18,8 @@ import { ShareCard } from '@/components/share-card';
 import { TrustBadge } from '@/components/trust-badge';
 import { MoneyRow } from '@/components/money';
 import { Sheet } from '@/components/sheet';
-import { Truck, Check, Scale, Lock, Shield, Flame, ArrowRight, ExternalLink } from '@/components/icons';
+import { FeedbackPicker, FeedbackBadge } from '@/components/feedback';
+import { Truck, Check, Scale, Lock, Shield, Flame, ArrowRight, ExternalLink, ThumbsUp } from '@/components/icons';
 
 export default function TradeDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -29,6 +30,7 @@ export default function TradeDetailPage() {
   const [events, setEvents] = useState<TradeEvent[]>([]);
   const [sellerStats, setSellerStats] = useState<PublicStats | null>(null);
   const [buyerStats, setBuyerStats] = useState<PublicStats | null>(null);
+  const [ratings, setRatings] = useState<Rating[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [shipOpen, setShipOpen] = useState(false);
@@ -40,6 +42,7 @@ export default function TradeDetailPage() {
       setEvents(d.events);
       setSellerStats(d.sellerStats);
       setBuyerStats(d.buyerStats);
+      setRatings(d.ratings ?? []);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not load trade.');
     }
@@ -92,6 +95,16 @@ export default function TradeDetailPage() {
 
         {/* Counterparty track record */}
         <Counterparty trade={trade} isSeller={isSeller} sellerStats={sellerStats} buyerStats={buyerStats} />
+
+        {/* Mutual rating — once the trade has settled */}
+        {(isSeller || isBuyer) && (
+          <RatingSection
+            trade={trade}
+            userUid={user?.uid ?? null}
+            ratings={ratings}
+            onRated={load}
+          />
+        )}
 
         {/* Contextual action region */}
         <ActionRegion
@@ -423,6 +436,103 @@ function Banner({ tone, title, body }: { tone: 'brand'; title: string; body: str
           <p className="text-[13px] text-slate mt-0.5 leading-snug">{body}</p>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ── Mutual rating ── */
+function RatingSection({
+  trade, userUid, ratings, onRated,
+}: {
+  trade: Trade; userUid: string | null; ratings: Rating[]; onRated: () => Promise<void> | void;
+}) {
+  // Only after a funded trade reaches a terminal outcome (has a counterparty).
+  if (!isTerminal(trade.state) || !trade.buyer_uid) return null;
+  const isParty = userUid === trade.seller_uid || userUid === trade.buyer_uid;
+  if (!isParty) return null;
+
+  const myRating = ratings.find((r) => r.rater_uid === userUid) ?? null;
+  const aboutMe = ratings.find((r) => r.ratee_uid === userUid) ?? null;
+  const counterName =
+    userUid === trade.seller_uid ? trade.buyer_username : trade.seller_username;
+
+  return (
+    <div className="card p-5 space-y-4">
+      <div className="flex items-center gap-2">
+        <ThumbsUp width={18} height={18} className="text-brand" />
+        <h3 className="font-display text-lg font-semibold">Rate this trade</h3>
+      </div>
+
+      {myRating ? (
+        <RatedRow label={`You rated @${counterName ?? 'them'}`} rating={myRating} />
+      ) : (
+        <RateForm tradeId={trade.id} counterName={counterName ?? 'your counterparty'} onRated={onRated} />
+      )}
+
+      {aboutMe && (
+        <>
+          <div className="hr" />
+          <RatedRow label={`@${aboutMe.rater_username ?? 'They'} rated you`} rating={aboutMe} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function RatedRow({ label, rating }: { label: string; rating: Rating }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[13px] text-muted">{label}</p>
+        <FeedbackBadge positive={rating.positive} />
+      </div>
+      {rating.comment && <p className="mt-1.5 text-[14px] text-ink leading-snug">“{rating.comment}”</p>}
+    </div>
+  );
+}
+
+function RateForm({
+  tradeId, counterName, onRated,
+}: {
+  tradeId: string; counterName: string; onRated: () => Promise<void> | void;
+}) {
+  const [positive, setPositive] = useState<boolean | null>(null);
+  const [comment, setComment] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    if (positive === null) return;
+    setBusy(true); setErr(null);
+    try {
+      await api.rate(tradeId, positive, comment.trim() || undefined);
+      await onRated();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not submit feedback.');
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <p className="text-[13px] text-muted leading-relaxed">
+        How was trading with <span className="font-semibold text-ink">@{counterName}</span>? Your feedback
+        builds their reputation and helps other pioneers trade with confidence.
+      </p>
+      <div className="mt-3.5">
+        <FeedbackPicker value={positive} onChange={setPositive} />
+      </div>
+      <textarea
+        value={comment}
+        onChange={(e) => setComment(e.target.value.slice(0, 280))}
+        rows={2}
+        placeholder="Add a note (optional) — e.g. fast shipping, exactly as described"
+        className="field h-auto py-3 mt-3 resize-none"
+      />
+      {err && <p className="mt-2 text-[13px] text-danger">{err}</p>}
+      <button onClick={submit} disabled={busy || positive === null} className="btn-primary w-full mt-3">
+        {busy ? 'Submitting…' : 'Submit feedback'}
+      </button>
     </div>
   );
 }

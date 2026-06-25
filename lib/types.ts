@@ -22,6 +22,9 @@ export interface Trade {
   inspect_deadline: string | null;
   settlement_deadline: string | null;
   evidence_hash: string | null;
+  /** True once the trade ever entered a dispute — excludes it from a seller's
+   *  qualifying (clean) trade count. (COMPLETED implies false by construction.) */
+  disputed?: boolean;
   partner_id: string | null;
   ref: string | null;
   idempotency_key: string | null;
@@ -76,7 +79,39 @@ export interface Profile {
   trades_completed: number;
   distinct_counterparties: number;
   disputes_total: number;
+  /** Seller's chosen per-trade cap (micro-Pi as string). null = unlimited
+   *  (Elite only). undefined on legacy docs → treated as the Starter default. */
+  trade_limit_micro?: string | null;
+  /** Rating aggregates — positive-feedback counts. Received AS a seller vs AS a
+   *  buyer, kept separate so a counterparty sees the score for the role that
+   *  matters to them. % positive = pos_count / rating_count. */
+  seller_pos_count?: number;
+  seller_rating_count?: number;
+  buyer_pos_count?: number;
+  buyer_rating_count?: number;
   created_at: string;
+}
+
+/** A mutual rating left after a funded trade reaches a terminal outcome.
+ *  Binary positive/negative feedback (à la P2P exchanges), aggregated to a
+ *  "% positive" score — a sharper trust signal than stars, which collapse to ~5. */
+export interface Rating {
+  id: string;
+  trade_id: string;
+  rater_uid: string;
+  rater_username: string | null;
+  ratee_uid: string;
+  /** The role the *ratee* played in this trade. */
+  ratee_role: 'seller' | 'buyer';
+  positive: boolean; // 👍 true / 👎 false
+  comment: string | null;
+  created_at: string;
+}
+
+/** Aggregate rating shown in the UI. */
+export interface RatingSummary {
+  positivePct: number | null; // 0..100, null if never rated in this role
+  count: number;
 }
 
 export interface SessionUser {
@@ -92,6 +127,11 @@ export interface PublicStats {
   settled: number;
   distinct_counterparties: number;
   completion_rate: number | null; // % of funded-terminal trades that ended well
+  /** Clean (never-disputed) completed trades as a seller — drives the tier. */
+  qualifying: number;
+  tier: { id: number; name: string; tone: string; ceiling_micro: string | null };
+  seller_rating: RatingSummary;
+  buyer_rating: RatingSummary;
 }
 
 export interface Partner {

@@ -1,12 +1,15 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AppBar } from '@/components/chrome';
 import { MoneyRow } from '@/components/money';
+import { TierBadge } from '@/components/tier-badge';
 import { api } from '@/lib/client-api';
-import { PARAMS, piToMicro, bondFor, microToPi } from '@/lib/escrow';
-import { Shield, Truck, Clock, Info } from '@/components/icons';
+import { PARAMS, piToMicro, bondFor, feeFor, microToPi } from '@/lib/escrow';
+import { limitLabel } from '@/lib/tiers';
+import { Shield, Truck, Clock, Info, TrendingUp } from '@/components/icons';
 
 const SHIP_OPTIONS = [
   { label: '24 hours', s: 24 * 3600 },
@@ -28,18 +31,30 @@ export default function CreatePage() {
   const [inspectWindowS, setInspect] = useState(PARAMS.INSPECT_DEFAULT_S);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Seller's earned per-trade ceiling + tier (replaces the old flat 50π cap).
+  const [cap, setCap] = useState<{ micro: bigint | null; tier: { name: string; tone: string } } | null>(null);
+
+  useEffect(() => {
+    api.profile()
+      .then((p) => setCap({
+        micro: p.effective_limit_micro === null ? null : BigInt(p.effective_limit_micro),
+        tier: { name: p.stats.tier.name, tone: p.stats.tier.tone },
+      }))
+      .catch(() => setCap({ micro: PARAMS.AMOUNT_CAP, tier: { name: 'Starter', tone: 'slate' } }));
+  }, []);
 
   const amountNum = parseFloat(amount);
+  const amountMicro = !Number.isNaN(amountNum) && amountNum > 0 ? piToMicro(amountNum) : 0n;
+  const overCap = !!cap && cap.micro !== null && amountMicro > cap.micro;
   const valid =
     !Number.isNaN(amountNum) &&
     amountNum >= microToPi(PARAMS.AMOUNT_FLOOR) &&
-    amountNum <= microToPi(PARAMS.AMOUNT_CAP) &&
+    !overCap &&
     memo.trim().length >= 3;
 
-  const sellerBond = useMemo(() => {
-    if (Number.isNaN(amountNum) || amountNum <= 0) return 0n;
-    return bondFor(piToMicro(amountNum));
-  }, [amountNum]);
+  const sellerBond = useMemo(() => (amountMicro > 0n ? bondFor(amountMicro) : 0n), [amountMicro]);
+  const fee = useMemo(() => (amountMicro > 0n ? feeFor(amountMicro) : 0n), [amountMicro]);
+  const netProceeds = amountMicro > fee ? amountMicro - fee : 0n;
 
   async function submit() {
     if (!valid) return;
@@ -77,9 +92,22 @@ export default function CreatePage() {
             />
             <span className="absolute right-4 top-1/2 -translate-y-1/2 font-display text-2xl text-muted">π</span>
           </div>
-          <p className="mt-2 text-[12px] text-faint">
-            Between {microToPi(PARAMS.AMOUNT_FLOOR)} and {microToPi(PARAMS.AMOUNT_CAP)} Pi at launch.
-          </p>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <p className="text-[12px] text-faint">
+              {cap
+                ? `From ${microToPi(PARAMS.AMOUNT_FLOOR)} π up to ${limitLabel(cap.micro)} per trade`
+                : 'Loading your limit…'}
+            </p>
+            {cap && <TierBadge name={cap.tier.name} tone={cap.tier.tone} className="!py-0.5 !px-2 shrink-0" />}
+          </div>
+          {overCap && cap && (
+            <p className="mt-1.5 text-[12px] text-danger flex items-center gap-1.5">
+              That’s over your {limitLabel(cap.micro)} per-trade limit.{' '}
+              <Link href="/profile" className="inline-flex items-center gap-1 font-semibold text-brand-dark underline-offset-2 hover:underline">
+                <TrendingUp width={13} height={13} /> Raise it
+              </Link>
+            </p>
+          )}
         </div>
 
         {/* Description */}
@@ -126,13 +154,23 @@ export default function CreatePage() {
           </div>
         </div>
 
-        {amount && (
+        {amount && amountMicro > 0n && (
           <div className="card p-4 animate-fade-up">
-            <MoneyRow label="Sale price" micro={piToMicro(amountNum || 0)} />
+            <h3 className="text-[13px] font-bold uppercase tracking-wider text-faint mb-1">
+              Your breakdown if this sale completes
+            </h3>
+            <MoneyRow label="Sale price" micro={amountMicro} />
             <div className="hr" />
-            <MoneyRow label="Your seller bond" micro={sellerBond} sub="Refunded on completion" />
+            <MoneyRow
+              label="Clasp commission (1.5%)"
+              micro={fee}
+              sign="-"
+              sub={`Min ${microToPi(PARAMS.FEE_MIN)} π · charged only when the sale completes`}
+            />
             <div className="hr" />
-            <MoneyRow label="You lock now" micro={sellerBond} emphasis sub="Only the bond — the buyer locks the price" />
+            <MoneyRow label="You receive" micro={netProceeds} emphasis sub="Net proceeds, plus your bond back" />
+            <div className="hr" />
+            <MoneyRow label="Your seller bond" micro={sellerBond} sub="Refunded on completion — you lock only this now" />
           </div>
         )}
 

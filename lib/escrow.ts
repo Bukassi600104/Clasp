@@ -167,12 +167,17 @@ export interface CreateTradeInput {
   amountMicro: bigint;
   shipWindowS: number;
   inspectWindowS: number;
+  /** The seller's effective per-trade cap (micro-Pi). null = unlimited.
+   *  undefined = use the legacy launch cap (for partner/API callers). */
+  maxAmountMicro?: bigint | null;
 }
 
 export function validateCreate(input: CreateTradeInput): string | null {
   const { amountMicro, shipWindowS, inspectWindowS } = input;
   if (amountMicro < PARAMS.AMOUNT_FLOOR) return 'Amount is below the 1 Pi floor.';
-  if (amountMicro > PARAMS.AMOUNT_CAP) return 'Amount is above the 50 Pi launch cap.';
+  const cap = input.maxAmountMicro === undefined ? PARAMS.AMOUNT_CAP : input.maxAmountMicro;
+  if (cap !== null && amountMicro > cap)
+    return `Amount is above your ${microToPi(cap).toLocaleString()} Pi per-trade limit.`;
   if (shipWindowS < PARAMS.SHIP_MIN_S || shipWindowS > PARAMS.SHIP_MAX_S)
     return 'Ship window must be between 24 hours and 14 days.';
   if (inspectWindowS < PARAMS.INSPECT_MIN_S || inspectWindowS > PARAMS.INSPECT_MAX_S)

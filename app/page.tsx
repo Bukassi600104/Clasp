@@ -11,6 +11,7 @@ import { Logo } from '@/components/brand';
 import { BottomNav } from '@/components/chrome';
 import { Avatar } from '@/components/avatar';
 import { TradeRow } from '@/components/trade-row';
+import { TierMeter } from '@/components/tier-meter';
 import { OpenLinkSheet } from '@/components/open-link-sheet';
 import { Lock, Shield, Scale, Plus, Bell, ArrowRight, Spark, ArrowUpRight, ArrowDownLeft, Check } from '@/components/icons';
 
@@ -127,6 +128,8 @@ function Dashboard() {
   const buying = active.filter((t) => roleOf(t) === 'buyer');
   const sellingValue = selling.reduce((s, t) => s + BigInt(t.amount_micro), 0n);
   const buyingValue = buying.reduce((s, t) => s + BigInt(t.amount_micro), 0n);
+  // Clean (never-disputed) completed trades as a seller — drives the tier ladder.
+  const qualifying = list.filter((t) => t.seller_uid === user?.uid && t.state === 'COMPLETED').length;
   const recent = list.slice(0, 6);
 
   return (
@@ -178,6 +181,13 @@ function Dashboard() {
         <StatCard Icon={ArrowUpRight} tone="brand" label="Selling" count={selling.length} value={sellingValue} />
         <StatCard Icon={ArrowDownLeft} tone="info" label="Buying" count={buying.length} value={buyingValue} />
       </div>
+
+      {/* Seller tier progress — compact, links to settings */}
+      {trades && (
+        <div className="px-5 pt-3">
+          <TierMeter qualifying={qualifying} />
+        </div>
+      )}
 
       {/* Action row — Open link · New trade · quick + */}
       <div className="px-5 pt-4 flex items-center gap-3">

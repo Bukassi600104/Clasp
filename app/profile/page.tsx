@@ -3,13 +3,16 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/app/providers';
-import { api } from '@/lib/client-api';
-import type { Trade } from '@/lib/types';
-import { isTerminal } from '@/lib/escrow';
+import { api, type OwnProfileView } from '@/lib/client-api';
+import type { Trade, RatingSummary } from '@/lib/types';
+import { isTerminal, microToPi } from '@/lib/escrow';
+import { nextTier, tradesToNext, tierProgress, limitLabel } from '@/lib/tiers';
 import { AppBar, BottomNav } from '@/components/chrome';
 import { Avatar } from '@/components/avatar';
 import { DonutRing } from '@/components/donut';
-import { Shield, Scale, ArrowRight } from '@/components/icons';
+import { TierBadge } from '@/components/tier-badge';
+import { FeedbackBadge } from '@/components/feedback';
+import { Shield, Scale, ArrowRight, Sliders, TrendingUp, ThumbsUp } from '@/components/icons';
 
 const C = {
   completed: '#0E7A53',
@@ -21,8 +24,10 @@ const C = {
 export default function ProfilePage() {
   const { user, signOut } = useAuth();
   const [trades, setTrades] = useState<Trade[] | null>(null);
+  const [view, setView] = useState<OwnProfileView | null>(null);
 
   useEffect(() => { api.myTrades().then(setTrades).catch(() => setTrades([])); }, []);
+  useEffect(() => { api.profile().then(setView).catch(() => {}); }, []);
 
   if (!user) return <div className="min-h-[100dvh] grid place-items-center text-muted">Sign in to view your profile.</div>;
 
@@ -94,6 +99,12 @@ export default function ProfilePage() {
           </div>
         </div>
 
+        {/* Selling limit + tier ladder */}
+        {view && <SellingLimitCard view={view} onSaved={setView} />}
+
+        {/* Reputation — mutual ratings */}
+        {view && <ReputationCard view={view} />}
+
         {/* Outcome breakdown */}
         {rows.length > 0 ? (
           <div className="card p-5">
@@ -158,6 +169,197 @@ function MiniStat({ label, value }: { label: string; value: string | number }) {
     <div className="rounded-xl bg-paper p-3.5">
       <p className="font-display text-2xl font-semibold tnum">{value}</p>
       <p className="text-[12px] text-faint mt-0.5">{label}</p>
+    </div>
+  );
+}
+
+/* ── Selling limit (tier ladder + slider) ── */
+function SellingLimitCard({ view, onSaved }: { view: OwnProfileView; onSaved: (v: OwnProfileView) => void }) {
+  const { stats } = view;
+  const qualifying = stats.qualifying;
+  const ceilingMicro = stats.tier.ceiling_micro;                 // string | null
+  const ceilingPi = ceilingMicro === null ? null : microToPi(BigInt(ceilingMicro));
+  const effectivePi = view.effective_limit_micro === null ? null : microToPi(BigInt(view.effective_limit_micro));
+  const next = nextTier(qualifying);
+  const toNext = tradesToNext(qualifying);
+  const pct = Math.round(tierProgress(qualifying) * 100);
+
+  const isElite = ceilingPi === null;
+  const sliderMax = ceilingPi ?? 10000;
+  const step = Math.max(1, Math.round(sliderMax / 100));
+
+  const [unlimited, setUnlimited] = useState(effectivePi === null);
+  const [value, setValue] = useState<number>(effectivePi ?? sliderMax);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const curMicro = view.effective_limit_micro;
+  const dirty = unlimited
+    ? curMicro !== null
+    : curMicro === null || Math.abs(microToPi(BigInt(curMicro)) - value) > 1e-9;
+
+  async function save() {
+    setBusy(true); setErr(null); setSaved(false);
+    try {
+      const v = await api.setLimit(unlimited ? null : value);
+      onSaved(v);
+      setSaved(true);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not update your limit.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card p-5">
+      <div className="flex items-center justify-between">
+        <h2 className="font-display text-lg font-semibold flex items-center gap-2">
+          <Sliders width={18} height={18} className="text-brand" /> Selling limit
+        </h2>
+        <TierBadge name={stats.tier.name} tone={stats.tier.tone} className="!py-0.5 !px-2" />
+      </div>
+
+      {/* Current saved cap */}
+      <div className="mt-4 rounded-xl bg-paper p-4 text-center">
+        <p className="text-[12px] text-faint">Your cap per trade</p>
+        <p className="font-display text-[32px] leading-none font-semibold tnum mt-1">
+          {limitLabel(view.effective_limit_micro === null ? null : BigInt(view.effective_limit_micro))}
+        </p>
+      </div>
+
+      {/* Tier progress */}
+      <div className="mt-4">
+        {next ? (
+          <>
+            <div className="flex items-center justify-between text-[13px]">
+              <span className="text-muted">
+                <span className="font-semibold text-ink tnum">{qualifying}</span> clean trade{qualifying === 1 ? '' : 's'}
+              </span>
+              <span className="text-faint flex items-center gap-1">
+                <TrendingUp width={14} height={14} />
+                <span className="tnum">{toNext}</span> more → {next.name} ({limitLabel(next.ceilingMicro ?? null)})
+              </span>
+            </div>
+            <div className="mt-2 h-1.5 rounded-full bg-paper overflow-hidden">
+              <div className="h-full rounded-full bg-brand" style={{ width: `${Math.max(4, pct)}%` }} />
+            </div>
+          </>
+        ) : (
+          <p className="text-[13px] text-brand-dark font-semibold flex items-center gap-1.5">
+            <TrendingUp width={15} height={15} /> Top tier reached — you can sell with no per-trade cap.
+          </p>
+        )}
+      </div>
+
+      {/* Cap control */}
+      <div className="mt-5">
+        <p className="text-[13px] text-muted leading-relaxed">
+          Set your per-trade cap anywhere up to your earned ceiling of{' '}
+          <span className="font-semibold text-ink">{limitLabel(ceilingMicro === null ? null : BigInt(ceilingMicro))}</span>.
+          Crossing a milestone unlocks a higher ceiling — you choose when to raise the cap.
+        </p>
+
+        {isElite && (
+          <label className="mt-3 flex items-center justify-between rounded-xl bg-paper px-4 py-3">
+            <span className="text-[14px] font-medium text-ink">No limit (unlimited)</span>
+            <input
+              type="checkbox"
+              checked={unlimited}
+              onChange={(e) => setUnlimited(e.target.checked)}
+              className="h-5 w-5 accent-brand"
+            />
+          </label>
+        )}
+
+        {!unlimited && (
+          <div className="mt-3">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[12px] text-faint">Per-trade cap</span>
+              <span className="text-[15px] font-semibold tnum">{value.toLocaleString()} π</span>
+            </div>
+            <input
+              type="range"
+              min={1}
+              max={sliderMax}
+              step={step}
+              value={value}
+              onChange={(e) => { setValue(Number(e.target.value)); setSaved(false); }}
+              className="w-full accent-brand"
+              aria-label="Per-trade cap"
+            />
+            <div className="flex justify-between text-[11px] text-faint mt-1">
+              <span>1 π</span>
+              <span>{sliderMax.toLocaleString()} π</span>
+            </div>
+          </div>
+        )}
+
+        {err && <p className="mt-2 text-[13px] text-danger">{err}</p>}
+        {saved && !dirty && <p className="mt-2 text-[13px] text-brand-dark font-medium">Limit saved.</p>}
+
+        <button onClick={save} disabled={busy || !dirty} className="btn-primary w-full mt-4">
+          {busy ? 'Saving…' : 'Save limit'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Reputation (mutual ratings) ── */
+function ReputationCard({ view }: { view: OwnProfileView }) {
+  const { stats, reviews } = view;
+  return (
+    <div className="card p-5">
+      <h2 className="font-display text-lg font-semibold mb-3 flex items-center gap-2">
+        <ThumbsUp width={18} height={18} className="text-brand" /> Your reputation
+      </h2>
+      <div className="grid grid-cols-2 gap-3">
+        <RatingStat label="As a seller" summary={stats.seller_rating} />
+        <RatingStat label="As a buyer" summary={stats.buyer_rating} />
+      </div>
+
+      {reviews.length > 0 && (
+        <>
+          <div className="hr my-4" />
+          <h3 className="text-[13px] font-bold uppercase tracking-wider text-faint mb-3">Recent reviews</h3>
+          <ul className="space-y-3.5">
+            {reviews.map((r) => (
+              <li key={r.id}>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[14px] font-medium text-ink truncate">
+                    @{r.rater_username ?? 'pioneer'}{' '}
+                    <span className="text-faint font-normal">· you as {r.ratee_role}</span>
+                  </span>
+                  <FeedbackBadge positive={r.positive} size={14} />
+                </div>
+                {r.comment && <p className="text-[13px] text-muted mt-1 leading-snug">“{r.comment}”</p>}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
+function RatingStat({ label, summary }: { label: string; summary: RatingSummary }) {
+  const good = (summary.positivePct ?? 0) >= 80;
+  return (
+    <div className="rounded-xl bg-paper p-3.5">
+      <p className="text-[12px] text-faint">{label}</p>
+      {summary.count > 0 && summary.positivePct != null ? (
+        <>
+          <div className="mt-1 flex items-center gap-1.5">
+            <ThumbsUp width={18} height={18} className={good ? 'text-brand' : 'text-warn'} />
+            <span className="font-display text-2xl font-semibold tnum">{summary.positivePct}%</span>
+          </div>
+          <p className="text-[11px] text-faint mt-0.5">positive · {summary.count} rating{summary.count === 1 ? '' : 's'}</p>
+        </>
+      ) : (
+        <p className="mt-1.5 text-[13px] text-faint">No ratings yet</p>
+      )}
     </div>
   );
 }

@@ -1,10 +1,12 @@
 import 'server-only';
 import type { Repo } from './repo';
+import { normalizeProfile } from './repo';
 import type {
   Trade, TradeEvent, SettlementProposal, Evidence, AppNotification, Profile,
-  Partner, WebhookDelivery,
+  Partner, WebhookDelivery, Rating,
 } from '../types';
 import { NON_TERMINAL } from '../escrow';
+import { DEFAULT_LIMIT_MICRO } from '../tiers';
 import { db } from '../firebase';
 
 /**
@@ -24,6 +26,8 @@ export class FirestoreRepo implements Repo {
       const p: Profile = {
         pi_uid: uid, username,
         trades_total: 0, trades_completed: 0, distinct_counterparties: 0, disputes_total: 0,
+        trade_limit_micro: DEFAULT_LIMIT_MICRO.toString(),
+        seller_pos_count: 0, seller_rating_count: 0, buyer_pos_count: 0, buyer_rating_count: 0,
         created_at: new Date().toISOString(),
       };
       await ref.set(p);
@@ -34,11 +38,11 @@ export class FirestoreRepo implements Repo {
       await ref.update({ username });
       p.username = username;
     }
-    return p;
+    return normalizeProfile(p);
   }
   async getProfile(uid: string) {
     const snap = await this.c.collection('users').doc(uid).get();
-    return snap.exists ? (snap.data() as Profile) : null;
+    return snap.exists ? normalizeProfile(snap.data() as Profile) : null;
   }
   async saveProfile(p: Profile) {
     await this.c.collection('users').doc(p.pi_uid).set(p);
@@ -81,6 +85,23 @@ export class FirestoreRepo implements Repo {
     const q = await this.c.collection('trade_events').where('trade_id', '==', tradeId).get();
     return q.docs.map((d) => d.data() as TradeEvent)
       .sort((a, b) => a.confirmed_at.localeCompare(b.confirmed_at));
+  }
+
+  // ── ratings ──
+  async addRating(r: Rating) { await this.c.collection('ratings').doc(r.id).set(r); }
+  async getRatingByRater(tradeId: string, raterUid: string) {
+    const q = await this.c.collection('ratings').where('trade_id', '==', tradeId).get();
+    const hit = q.docs.map((d) => d.data() as Rating).find((r) => r.rater_uid === raterUid);
+    return hit ?? null;
+  }
+  async listRatingsForTrade(tradeId: string) {
+    const q = await this.c.collection('ratings').where('trade_id', '==', tradeId).get();
+    return q.docs.map((d) => d.data() as Rating);
+  }
+  async listRatingsAbout(uid: string) {
+    const q = await this.c.collection('ratings').where('ratee_uid', '==', uid).get();
+    return q.docs.map((d) => d.data() as Rating)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
 
   // ── proposals ──

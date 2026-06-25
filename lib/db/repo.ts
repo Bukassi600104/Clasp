@@ -1,11 +1,28 @@
 import 'server-only';
 import type {
   Trade, TradeEvent, SettlementProposal, Evidence, AppNotification, Profile,
-  Partner, WebhookDelivery,
+  Partner, WebhookDelivery, Rating,
 } from '../types';
+import { DEFAULT_LIMIT_MICRO } from '../tiers';
 import { firebaseConfigured } from '../firebase';
 import { MemoryRepo } from './memory-repo';
 import { FirestoreRepo } from './firestore-repo';
+
+/** Fill defaults for fields added after launch, so legacy docs read cleanly and
+ *  never round-trip an `undefined` (which Firestore rejects). A missing
+ *  trade_limit_micro means a legacy seller → defaults to the Starter cap, so a
+ *  higher tier still requires opting in. `null` (unlimited) is preserved. */
+export function normalizeProfile(p: Profile): Profile {
+  return {
+    ...p,
+    trade_limit_micro:
+      p.trade_limit_micro === undefined ? DEFAULT_LIMIT_MICRO.toString() : p.trade_limit_micro,
+    seller_pos_count: p.seller_pos_count ?? 0,
+    seller_rating_count: p.seller_rating_count ?? 0,
+    buyer_pos_count: p.buyer_pos_count ?? 0,
+    buyer_rating_count: p.buyer_rating_count ?? 0,
+  };
+}
 
 /**
  * Persistence interface. Two implementations:
@@ -33,6 +50,12 @@ export interface Repo {
   // events
   addEvent(e: TradeEvent): Promise<void>;
   listEvents(tradeId: string): Promise<TradeEvent[]>;
+
+  // ratings (mutual buyer↔seller feedback)
+  addRating(r: Rating): Promise<void>;
+  getRatingByRater(tradeId: string, raterUid: string): Promise<Rating | null>;
+  listRatingsForTrade(tradeId: string): Promise<Rating[]>;
+  listRatingsAbout(uid: string): Promise<Rating[]>;
 
   // settlement proposals
   addProposal(p: SettlementProposal): Promise<void>;

@@ -1,10 +1,12 @@
 import 'server-only';
 import type { Repo } from './repo';
+import { normalizeProfile } from './repo';
 import type {
   Trade, TradeEvent, SettlementProposal, Evidence, AppNotification, Profile,
-  Partner, WebhookDelivery,
+  Partner, WebhookDelivery, Rating,
 } from '../types';
 import { isTerminal } from '../escrow';
+import { DEFAULT_LIMIT_MICRO } from '../tiers';
 
 /**
  * In-memory repository. Default when Firebase is not configured. Suitable for a
@@ -20,6 +22,7 @@ export class MemoryRepo implements Repo {
   private profiles = new Map<string, Profile>();
   private partners = new Map<string, Partner>();
   private deliveries = new Map<string, WebhookDelivery>();
+  private ratings: Rating[] = [];
 
   async upsertUser(uid: string, username: string): Promise<Profile> {
     let p = this.profiles.get(uid);
@@ -27,17 +30,19 @@ export class MemoryRepo implements Repo {
       p = {
         pi_uid: uid, username,
         trades_total: 0, trades_completed: 0, distinct_counterparties: 0, disputes_total: 0,
+        trade_limit_micro: DEFAULT_LIMIT_MICRO.toString(),
+        seller_pos_count: 0, seller_rating_count: 0, buyer_pos_count: 0, buyer_rating_count: 0,
         created_at: new Date().toISOString(),
       };
       this.profiles.set(uid, p);
     } else if (username && p.username !== username) {
       p.username = username;
     }
-    return { ...p };
+    return normalizeProfile({ ...p });
   }
   async getProfile(uid: string) {
     const p = this.profiles.get(uid);
-    return p ? { ...p } : null;
+    return p ? normalizeProfile({ ...p }) : null;
   }
   async saveProfile(p: Profile) {
     this.profiles.set(p.pi_uid, { ...p });
@@ -74,6 +79,20 @@ export class MemoryRepo implements Repo {
     return this.events.filter((e) => e.trade_id === tradeId)
       .map((e) => ({ ...e }))
       .sort((a, b) => a.confirmed_at.localeCompare(b.confirmed_at));
+  }
+
+  async addRating(r: Rating) { this.ratings.push({ ...r }); }
+  async getRatingByRater(tradeId: string, raterUid: string) {
+    const hit = this.ratings.find((r) => r.trade_id === tradeId && r.rater_uid === raterUid);
+    return hit ? { ...hit } : null;
+  }
+  async listRatingsForTrade(tradeId: string) {
+    return this.ratings.filter((r) => r.trade_id === tradeId).map((r) => ({ ...r }));
+  }
+  async listRatingsAbout(uid: string) {
+    return this.ratings.filter((r) => r.ratee_uid === uid)
+      .map((r) => ({ ...r }))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
 
   async addProposal(p: SettlementProposal) { this.proposals.push({ ...p }); }
