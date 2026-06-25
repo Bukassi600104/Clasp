@@ -23,9 +23,11 @@ export const POST = handler(async (req: NextRequest) => {
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return fail('paymentId, txid and tradeId are required.');
 
-  if (process.env.PI_API_KEY) {
-    await completePayment(parsed.data.paymentId, parsed.data.txid);
+  if (!process.env.PI_API_KEY) {
+    console.error('[clasp] PI_API_KEY is not set — cannot complete Pi payments.');
+    return fail('Payments are not available right now. Please try again shortly.', 503);
   }
+  await completePayment(parsed.data.paymentId, parsed.data.txid);
   const trade = await fundTrade(parsed.data.tradeId, session.uid, session.username, parsed.data.txid);
   return ok(trade);
 });
