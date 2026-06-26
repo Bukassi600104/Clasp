@@ -62,6 +62,21 @@ export async function getPayment(paymentId: string): Promise<PiPayment> {
   return (await res.json()) as PiPayment;
 }
 
+/**
+ * Payments this app approved but never completed (user signed, server never
+ * called /complete). An unresolved one blocks the user from starting a NEW
+ * payment — a common cause of the wallet hanging at "Preparing for a payment".
+ */
+export async function getIncompleteServerPayments(): Promise<PiPayment[]> {
+  const res = await fetch(`${PI_API_BASE}/v2/payments/incomplete_server_payments`, {
+    headers: { Authorization: authHeader() },
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new Error(`getIncompleteServerPayments failed (${res.status}).`);
+  const data = (await res.json()) as { incomplete_server_payments?: PiPayment[] };
+  return data.incomplete_server_payments ?? [];
+}
+
 export async function approvePayment(paymentId: string): Promise<void> {
   const res = await fetch(`${PI_API_BASE}/v2/payments/${paymentId}/approve`, {
     method: 'POST',

@@ -33,10 +33,14 @@ export const POST = handler(async (req: NextRequest) => {
     return fail('Payments are not available right now. Please try again shortly.', 503);
   }
 
+  console.log(`[clasp] approve START payment=${parsed.data.paymentId} trade=${parsed.data.tradeId} expected=${expected}`);
   const payment = await getPayment(parsed.data.paymentId);
+  console.log(`[clasp] approve payment.amount=${payment.amount} status=${JSON.stringify(payment.status)}`);
   if (Math.abs(payment.amount - expected) > 1e-6) {
+    console.error(`[clasp] approve AMOUNT MISMATCH pi=${payment.amount} expected=${expected}`);
     return fail('Payment amount does not match the trade lock amount.', 409);
   }
   await approvePayment(parsed.data.paymentId);
+  console.log(`[clasp] approve OK payment=${parsed.data.paymentId}`);
   return ok({ approved: true, expected });
 });
