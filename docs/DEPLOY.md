@@ -30,12 +30,22 @@ vercel env add FIREBASE_PRIVATE_KEY      # paste with literal \n, wrapped in quo
 vercel env add SESSION_SECRET            # node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 vercel env add CRON_SECRET
 vercel env add ADMIN_SECRET
-vercel env add NEXT_PUBLIC_PI_SANDBOX    # "true" for testnet builds
+vercel env add NEXT_PUBLIC_PI_SANDBOX    # leave UNSET/false for Pi Browser (see note below)
 vercel deploy --prod
 ```
 `vercel.json` already registers the hourly cron (`/api/cron/reminders` — deadline
 reminders + webhook retries). Confirm `GET /api/health` shows
 `"persistence":"firestore"`.
+
+> ⚠️ **`NEXT_PUBLIC_PI_SANDBOX` does NOT select Testnet vs Mainnet.** It only
+> controls `Pi.init({ sandbox })`. `sandbox: true` targets the desktop dev
+> environment at `sandbox.minepi.com` and is for local development only. For the
+> deployed app opened inside the **real Pi Browser, it MUST be `false`** (leave
+> the var unset) — for **both** Testnet and Mainnet apps. The network is chosen
+> by the app's **Developer Portal registration** (step 3), and the SDK connects
+> to it automatically. `PI_API_KEY` must be the key of that *same* portal app, or
+> server-side `GET /v2/payments/{id}` returns 404 and approval fails with
+> "the developer has failed to approve this payment."
 
 ## 3. Pi Developer Portal
 
@@ -80,8 +90,9 @@ to route writes through wallet-signed contract calls and reads through Pi RPC
    timeouts proven, dispute/adversarial sims, fuzzing, independent audit published).
 2. Register a **separate Mainnet app** in the portal (new API key + KYC'd wallet).
 3. Re-deploy the contract to mainnet, update `NEXT_PUBLIC_CONTRACT_ADDRESS`.
-4. Flip `NEXT_PUBLIC_PI_SANDBOX=false`, swap to the mainnet `PI_API_KEY` /
-   `PI_VALIDATION_KEY`, redeploy.
+4. Keep `NEXT_PUBLIC_PI_SANDBOX` unset/false (it stays false for Pi Browser on
+   either network); swap to the mainnet `PI_API_KEY` / `PI_VALIDATION_KEY` from
+   the new mainnet portal app, and redeploy.
 5. Apply for the Pi Ecosystem Directory listing.
 
 ## Verify after every deploy

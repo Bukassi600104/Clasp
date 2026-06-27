@@ -13,6 +13,15 @@ import 'server-only';
 const PI_API_BASE = process.env.PI_API_BASE || 'https://api.minepi.com';
 const PI_API_KEY = process.env.PI_API_KEY;
 
+// Pi's wallet only waits a short window for the developer to approve/complete a
+// payment. If the Pi API hangs, a serverless function with no timeout would sit
+// there until the platform limit, silently blowing that window. Cap each call so
+// it fails fast with a clear error instead.
+const PI_TIMEOUT_MS = 12_000;
+function piSignal(): AbortSignal {
+  return AbortSignal.timeout(PI_TIMEOUT_MS);
+}
+
 function authHeader(): string {
   if (!PI_API_KEY) {
     throw new Error('PI_API_KEY is not configured on the server.');
@@ -30,6 +39,7 @@ export async function verifyAccessToken(accessToken: string): Promise<PiMe> {
   const res = await fetch(`${PI_API_BASE}/v2/me`, {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: 'no-store',
+    signal: piSignal(),
   });
   if (!res.ok) {
     throw new Error(`Pi token verification failed (${res.status}).`);
@@ -57,6 +67,7 @@ export async function getPayment(paymentId: string): Promise<PiPayment> {
   const res = await fetch(`${PI_API_BASE}/v2/payments/${paymentId}`, {
     headers: { Authorization: authHeader() },
     cache: 'no-store',
+    signal: piSignal(),
   });
   if (!res.ok) throw new Error(`getPayment failed (${res.status}).`);
   return (await res.json()) as PiPayment;
@@ -71,6 +82,7 @@ export async function getIncompleteServerPayments(): Promise<PiPayment[]> {
   const res = await fetch(`${PI_API_BASE}/v2/payments/incomplete_server_payments`, {
     headers: { Authorization: authHeader() },
     cache: 'no-store',
+    signal: piSignal(),
   });
   if (!res.ok) throw new Error(`getIncompleteServerPayments failed (${res.status}).`);
   const data = (await res.json()) as { incomplete_server_payments?: PiPayment[] };
@@ -81,6 +93,7 @@ export async function approvePayment(paymentId: string): Promise<void> {
   const res = await fetch(`${PI_API_BASE}/v2/payments/${paymentId}/approve`, {
     method: 'POST',
     headers: { Authorization: authHeader() },
+    signal: piSignal(),
   });
   if (!res.ok) throw new Error(`approvePayment failed (${res.status}).`);
 }
@@ -96,6 +109,7 @@ export async function completePayment(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ txid }),
+    signal: piSignal(),
   });
   if (!res.ok) throw new Error(`completePayment failed (${res.status}).`);
 }
@@ -104,6 +118,7 @@ export async function cancelPayment(paymentId: string): Promise<void> {
   const res = await fetch(`${PI_API_BASE}/v2/payments/${paymentId}/cancel`, {
     method: 'POST',
     headers: { Authorization: authHeader() },
+    signal: piSignal(),
   });
   if (!res.ok) throw new Error(`cancelPayment failed (${res.status}).`);
 }

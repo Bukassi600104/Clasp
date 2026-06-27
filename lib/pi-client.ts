@@ -116,22 +116,31 @@ export function createPayment(
     onError?: (error: Error) => void;
   }
 ): void {
+  // Pi allows only ONE pending payment per user. If a previous trade left a
+  // payment unresolved (e.g. it expired before completion), Pi surfaces it via
+  // onIncompletePaymentFound — and a NEW createPayment will hang until it times
+  // out ("The approval process has timed out") unless that leftover is cleared
+  // FIRST. Capture the reconcile call and AWAIT it before starting the new
+  // payment, rather than firing it off and racing ahead into createPayment.
+  let reconcile: Promise<void> = Promise.resolve();
+
   ensureInit()
     // Request the payments scope just-in-time (sign-in only granted `username`).
     .then((Pi) =>
-      Pi.authenticate(['username', 'payments'], async (payment) => {
-        try {
-          await fetch('/api/payments/incomplete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ paymentId: payment.identifier }),
-          });
-        } catch {
-          /* reconciled on next indexer pass */
-        }
+      Pi.authenticate(['username', 'payments'], (payment) => {
+        reconcile = fetch('/api/payments/incomplete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paymentId: payment.identifier }),
+        })
+          .then(() => undefined)
+          .catch(() => undefined /* reconciled on next indexer pass */);
       }).then(() => Pi)
     )
-    .then((Pi) => {
+    .then(async (Pi) => {
+      // Block until any leftover payment is cancelled/completed server-side, so
+      // Pi isn't still holding a pending payment when we open the new one.
+      await reconcile;
       Pi.createPayment(data, {
         onReadyForServerApproval: (paymentId) => {
           handlers.onApprovalRequested(paymentId).catch((e) =>

@@ -1,10 +1,20 @@
 import { NextRequest } from 'next/server';
+import { createHash, timingSafeEqual } from 'crypto';
 import {
   getIncompleteServerPayments, completePayment, cancelPayment,
 } from '@/lib/pi-server';
 import { handler, ok, fail } from '@/lib/api';
 
 export const dynamic = 'force-dynamic';
+
+// SECURITY (A07): compare secrets in constant time. Hashing to a fixed length
+// first lets us compare without leaking length and satisfies timingSafeEqual's
+// equal-length requirement — defeats timing side-channels on ADMIN_SECRET.
+function secretsMatch(a: string, b: string): boolean {
+  const ha = createHash('sha256').update(a).digest();
+  const hb = createHash('sha256').update(b).digest();
+  return timingSafeEqual(ha, hb);
+}
 
 /**
  * Admin diagnostic + repair for stuck Pi payments (ADMIN_SECRET-guarded).
@@ -15,9 +25,11 @@ export const dynamic = 'force-dynamic';
  *         Body: { id?: string } to target one, or empty to sweep all.
  */
 function authed(req: NextRequest): boolean {
+  const secret = process.env.ADMIN_SECRET;
+  if (!secret) return false; // fail-closed: no secret configured → deny
   const h = req.headers.get('authorization') ?? '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : '';
-  return !!process.env.ADMIN_SECRET && token === process.env.ADMIN_SECRET;
+  return token.length > 0 && secretsMatch(token, secret);
 }
 
 export const GET = handler(async (req: NextRequest) => {

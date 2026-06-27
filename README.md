@@ -89,7 +89,7 @@ See [`.env.example`](./.env.example). Summary:
 |---|---|---|
 | `PI_API_KEY` | Secret Pi Platform API key (server only) | ✅ |
 | `PI_VALIDATION_KEY` | Served at `/validation-key.txt` for Pi Developer Portal | ✅ |
-| `NEXT_PUBLIC_PI_SANDBOX` | `true` for testnet, `false` for mainnet | ✅ |
+| `NEXT_PUBLIC_PI_SANDBOX` | `Pi.init` sandbox flag. `false`/unset for the real Pi Browser (both Testnet AND Mainnet); `true` only for desktop `sandbox.minepi.com` dev. Network is set by portal registration, NOT this flag. | ✅ |
 | `SESSION_SECRET` | Signs the session cookie | ✅ |
 | `FIREBASE_PROJECT_ID` / `FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY` | Firestore persistence (required on serverless) | ✅ |
 | `FIRESTORE_EMULATOR_HOST` | Local emulator instead of prod Firestore | dev only |
@@ -111,10 +111,14 @@ See [`.env.example`](./.env.example). Summary:
 3. **Pi Developer Portal.** Register the app, set the secret API key as
    `PI_API_KEY`, and host the domain validation key by setting
    `PI_VALIDATION_KEY` (served at `https://<domain>/validation-key.txt`).
-4. **Sandbox first.** Set `NEXT_PUBLIC_PI_SANDBOX=true` and pass the Pi testnet
-   validation gates in PRD §12 before flipping to mainnet.
-5. **Mainnet.** Deploy the audited contract, set `NEXT_PUBLIC_CONTRACT_ADDRESS`
-   and `NEXT_PUBLIC_PI_SANDBOX=false`, and launch with the 50 Pi cap.
+4. **Testnet first.** Register the portal app on **Pi Testnet** and use that
+   app's `PI_API_KEY`. Keep `NEXT_PUBLIC_PI_SANDBOX` unset/false — in the real Pi
+   Browser the SDK connects to your app's registered network automatically (the
+   sandbox flag is only for desktop `sandbox.minepi.com` testing). Pass the PRD
+   §12 gates before mainnet.
+5. **Mainnet.** Register a separate Mainnet portal app, swap in its `PI_API_KEY`,
+   deploy the audited contract, set `NEXT_PUBLIC_CONTRACT_ADDRESS`, and launch
+   with the 50 Pi cap. `NEXT_PUBLIC_PI_SANDBOX` stays false.
 
 See [`docs/`](./docs) for the Pi compliance mapping, the contract specification,
 and the CT submission package.
