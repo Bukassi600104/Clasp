@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { tradesNeedingReminder } from '@/lib/store';
 import { retryDueWebhooks } from '@/lib/webhooks';
+import { processPendingPayouts } from '@/lib/payouts';
+import { payoutsEnabled } from '@/lib/pi-payout';
 
 export const dynamic = 'force-dynamic';
+// May submit on-chain payouts — allow time to drain the queue.
+export const maxDuration = 300;
 
 /**
  * Hourly worker (PRD §11): deadline reminders + webhook retries.
@@ -32,5 +36,10 @@ export async function GET(req: NextRequest) {
   }
 
   const webhooksRetried = await retryDueWebhooks();
-  return NextResponse.json({ ok: true, scanned: trades.length, reminded, webhooksRetried });
+  // Daily backstop for custodial payouts (Hobby allows only daily crons). Prompt
+  // settlement during the day is driven by POST /api/admin/payouts; on Pro, add a
+  // frequent /api/cron/payouts schedule instead.
+  const payouts = payoutsEnabled() ? await processPendingPayouts() : { skipped: true };
+
+  return NextResponse.json({ ok: true, scanned: trades.length, reminded, webhooksRetried, payouts });
 }
