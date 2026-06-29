@@ -12,6 +12,7 @@ const CreateBody = z.object({
   shipWindowS: z.number().int().min(PARAMS.SHIP_MIN_S).max(PARAMS.SHIP_MAX_S),
   inspectWindowS: z.number().int().min(PARAMS.INSPECT_MIN_S).max(PARAMS.INSPECT_MAX_S),
   memo: z.string().trim().min(3).max(140),
+  feePayer: z.enum(['seller', 'buyer']).optional(),
   ref: z.string().max(120).optional(),
 });
 
@@ -48,6 +49,7 @@ export const POST = handler(async (req: NextRequest) => {
     shipWindowS: parsed.data.shipWindowS,
     inspectWindowS: parsed.data.inspectWindowS,
     memo: parsed.data.memo,
+    feePayer: parsed.data.feePayer,
     ref: parsed.data.ref ?? null,
     idempotencyKey: idemKey,
   });

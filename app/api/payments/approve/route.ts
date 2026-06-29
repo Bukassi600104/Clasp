@@ -56,7 +56,9 @@ export const POST = handler(async (req: NextRequest) => {
     throw e;
   }
   if (!trade) return fail('Trade not found.', 404);
-  const expected = microToPi(buyerLockTotal(BigInt(trade.amount_micro)));
+  // Include the platform fee in the expected lock when the BUYER pays it, or the
+  // (larger) buyer payment would be rejected as a mismatch.
+  const expected = microToPi(buyerLockTotal(BigInt(trade.amount_micro), trade.fee_payer));
   console.log(`[clasp] approve expected=${expected} payment.amount=${payment.amount} status=${JSON.stringify(payment.status)}`);
   if (Math.abs(payment.amount - expected) > 1e-6) {
     console.error(`[clasp] approve AMOUNT MISMATCH pi=${payment.amount} expected=${expected}`);

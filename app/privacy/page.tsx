@@ -5,7 +5,7 @@ import { ArrowLeft } from '@/components/icons';
 
 export const metadata: Metadata = {
   title: 'Privacy Policy — Clasp',
-  description: 'How Clasp handles your data: minimal, Pi-only, non-custodial. We never see your keys.',
+  description: 'How Clasp handles your data: minimal and Pi-only. We never see your wallet keys or passphrase.',
 };
 
 const UPDATED = 'June 2026';
@@ -25,8 +25,9 @@ export default function PrivacyPage() {
       <p className="text-[13px] text-faint mt-1">Last updated: {UPDATED}</p>
 
       <p className="mt-5 text-[15px] text-muted leading-relaxed">
-        Clasp is a non-custodial escrow app for the Pi Network. We collect the minimum data
-        needed to run a safe trade, and we never hold your funds or see your keys.
+        Clasp is a custodial escrow app for the Pi Network: it holds the buyer&apos;s payment
+        until delivery is confirmed, then releases it by the trade&apos;s rules. We collect the
+        minimum data needed to run a safe trade, and we never see your wallet keys or passphrase.
       </p>
 
       <Section title="What we collect">

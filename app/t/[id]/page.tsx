@@ -6,7 +6,7 @@ import { useAuth } from '@/app/providers';
 import { api } from '@/lib/client-api';
 import { createPayment, isPiBrowser } from '@/lib/pi-client';
 import type { Trade, PublicStats } from '@/lib/types';
-import { buyerLockTotal, bondFor, microToPi } from '@/lib/escrow';
+import { buyerLockTotal, bondFor, feeFor, microToPi } from '@/lib/escrow';
 import { formatPi, windowLabel } from '@/lib/format';
 import { Logo } from '@/components/brand';
 import { HeroAmount, MoneyRow } from '@/components/money';
@@ -42,7 +42,8 @@ export default function CheckoutPage() {
 
   const amount = BigInt(trade.amount_micro);
   const buyerBond = bondFor(amount);
-  const total = buyerLockTotal(amount);
+  const buyerFee = trade.fee_payer === 'buyer' ? feeFor(amount) : 0n;
+  const total = buyerLockTotal(amount, trade.fee_payer);
 
   async function lockFunds() {
     if (!user) { await signIn(); return; }
@@ -136,6 +137,13 @@ export default function CheckoutPage() {
           <div className="hr" />
           <MoneyRow label="Your refundable bond" micro={buyerBond}
             sub="Comes back when the trade completes" />
+          {buyerFee > 0n && (
+            <>
+              <div className="hr" />
+              <MoneyRow label="Platform fee (1.5%)" micro={buyerFee}
+                sub="The seller asked the buyer to cover this" />
+            </>
+          )}
           <div className="hr" />
           <MoneyRow label="Total to lock" micro={total} emphasis />
         </div>

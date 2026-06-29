@@ -29,6 +29,7 @@ export default function CreatePage() {
   const [memo, setMemo] = useState('');
   const [shipWindowS, setShip] = useState(PARAMS.SHIP_DEFAULT_S);
   const [inspectWindowS, setInspect] = useState(PARAMS.INSPECT_DEFAULT_S);
+  const [feePayer, setFeePayer] = useState<'seller' | 'buyer'>('buyer');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // Seller's earned per-trade ceiling + tier (replaces the old flat 50π cap).
@@ -54,7 +55,9 @@ export default function CreatePage() {
 
   const sellerBond = useMemo(() => (amountMicro > 0n ? bondFor(amountMicro) : 0n), [amountMicro]);
   const fee = useMemo(() => (amountMicro > 0n ? feeFor(amountMicro) : 0n), [amountMicro]);
-  const netProceeds = amountMicro > fee ? amountMicro - fee : 0n;
+  // What the seller nets on completion: full price if the buyer pays the fee,
+  // price − fee if the seller absorbs it.
+  const netProceeds = feePayer === 'buyer' ? amountMicro : (amountMicro > fee ? amountMicro - fee : 0n);
 
   async function submit() {
     if (!valid) return;
@@ -66,6 +69,7 @@ export default function CreatePage() {
         shipWindowS,
         inspectWindowS,
         memo: memo.trim(),
+        feePayer,
       });
       router.push(`/trade/${trade.id}?created=1`);
     } catch (e) {
@@ -142,13 +146,41 @@ export default function CreatePage() {
           onChange={setInspect}
         />
 
+        {/* Who pays the platform fee */}
+        <div>
+          <label className="label">Who pays the 1.5% platform fee?</label>
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { v: 'buyer', label: 'Buyer pays', sub: 'Added on top of the price' },
+              { v: 'seller', label: 'I’ll pay it', sub: 'Taken from my proceeds' },
+            ] as const).map((o) => {
+              const active = feePayer === o.v;
+              return (
+                <button
+                  key={o.v}
+                  onClick={() => setFeePayer(o.v)}
+                  className={`rounded-xl p-3 text-left transition ring-1 ${
+                    active ? 'bg-sink text-white ring-sink' : 'bg-surface text-muted ring-line active:scale-95'
+                  }`}
+                >
+                  <p className="text-[14px] font-semibold">{o.label}</p>
+                  <p className={`text-[12px] mt-0.5 ${active ? 'text-white/70' : 'text-faint'}`}>{o.sub}</p>
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-[12px] text-faint">
+            The bond is separate — both you and the buyer always post a refundable security bond.
+          </p>
+        </div>
+
         {/* Bond explainer */}
         <div className="card p-4 bg-brand-soft ring-brand/15">
           <div className="flex gap-3">
             <Shield width={20} height={20} className="text-brand-dark shrink-0 mt-0.5" />
             <div className="text-[13px] leading-relaxed text-slate">
               <span className="font-semibold text-brand-dark">You both put down a good-faith bond.</span>{' '}
-              You lock a {Number(PARAMS.BOND_PCT)}% seller bond (min {microToPi(PARAMS.BOND_FLOOR)} Pi) when you create this trade.
+              You pay a {Number(PARAMS.BOND_PCT)}% seller bond (min {microToPi(PARAMS.BOND_FLOOR)} Pi) when you create this trade.
               It comes back in full when the trade completes — it only ever matters if you walk away.
             </div>
           </div>
@@ -159,18 +191,20 @@ export default function CreatePage() {
             <h3 className="text-[13px] font-bold uppercase tracking-wider text-faint mb-1">
               Your breakdown if this sale completes
             </h3>
-            <MoneyRow label="Sale price" micro={amountMicro} />
+            <MoneyRow label="Item price" micro={amountMicro} />
             <div className="hr" />
             <MoneyRow
-              label="Clasp commission (1.5%)"
+              label="Platform fee (1.5%)"
               micro={fee}
-              sign="-"
-              sub={`Min ${microToPi(PARAMS.FEE_MIN)} π · charged only when the sale completes`}
+              sign={feePayer === 'seller' ? '-' : undefined}
+              sub={feePayer === 'buyer'
+                ? `Min ${microToPi(PARAMS.FEE_MIN)} π · the buyer pays this on top`
+                : `Min ${microToPi(PARAMS.FEE_MIN)} π · taken from your proceeds`}
             />
             <div className="hr" />
-            <MoneyRow label="You receive" micro={netProceeds} emphasis sub="Net proceeds, plus your bond back" />
+            <MoneyRow label="You receive" micro={netProceeds} emphasis sub="Plus your bond back on completion" />
             <div className="hr" />
-            <MoneyRow label="Your seller bond" micro={sellerBond} sub="Refunded on completion — you lock only this now" />
+            <MoneyRow label="Your seller bond" micro={sellerBond} sub="Refunded on completion — you pay this now to create" />
           </div>
         )}
 

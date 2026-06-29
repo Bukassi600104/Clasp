@@ -12,6 +12,9 @@ export interface Trade {
   buyer_bond_micro: string;
   seller_bond_micro: string;
   fee_micro: string;
+  /** Who pays the separate 1.5% platform fee — chosen by the seller at creation.
+   *  Absent on legacy trades → treated as 'seller' (fee carved from proceeds). */
+  fee_payer?: 'seller' | 'buyer';
   memo: string;
   ship_window_s: number;
   inspect_window_s: number;

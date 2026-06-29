@@ -288,19 +288,21 @@ function OutcomeCard({ trade, amount }: { trade: Trade; amount: bigint }) {
   const bond = bondFor(amount);
 
   if (trade.state === 'COMPLETED') {
-    const p = completedPayout(amount);
+    const p = completedPayout(amount, trade.fee_payer);
     return (
       <Breakdown title="Final payout">
-        <MoneyRow label="Seller received" micro={p.sellerReceives} sub="Price − 1.5% fee + bond back" />
+        <MoneyRow label="Seller received" micro={p.sellerReceives}
+          sub={trade.fee_payer === 'buyer' ? 'Full price + bond back' : 'Price − 1.5% fee + bond back'} />
         <div className="hr" />
         <MoneyRow label="Buyer bond returned" micro={p.buyerReceives} />
         <div className="hr" />
-        <MoneyRow label="Network fee" micro={p.operatorFee} sub="1.5%, only on completion" />
+        <MoneyRow label="Platform fee" micro={p.operatorFee}
+          sub={`1.5%, paid by the ${trade.fee_payer === 'buyer' ? 'buyer' : 'seller'}`} />
       </Breakdown>
     );
   }
   if (trade.state === 'REFUNDED') {
-    const p = refundedPayout(amount);
+    const p = refundedPayout(amount, trade.fee_payer);
     return (
       <Breakdown title="Refund settled">
         <MoneyRow label="Buyer refunded" micro={p.buyerReceives} sub="Price + bond, in full" />
@@ -310,7 +312,7 @@ function OutcomeCard({ trade, amount }: { trade: Trade; amount: bigint }) {
     );
   }
   if (trade.state === 'NUCLEAR') {
-    const p = nuclearPayout(amount);
+    const p = nuclearPayout(amount, trade.fee_payer);
     return (
       <Breakdown title="Nuclear outcome" danger>
         <div className="flex gap-3 items-start pb-3">
@@ -346,7 +348,7 @@ function OutcomeCard({ trade, amount }: { trade: Trade; amount: bigint }) {
       <div className="hr" />
       <MoneyRow label="Seller bond" micro={bond} sub="Locked at creation" />
       <div className="hr" />
-      <MoneyRow label="Total escrowed" micro={trade.buyer_uid ? buyerLockTotal(amount) + bond : bond} emphasis />
+      <MoneyRow label="Total escrowed" micro={trade.buyer_uid ? buyerLockTotal(amount, trade.fee_payer) + bond : bond} emphasis />
     </Breakdown>
   );
 }

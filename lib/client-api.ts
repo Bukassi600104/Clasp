@@ -41,6 +41,7 @@ export const api = {
     shipWindowS: number;
     inspectWindowS: number;
     memo: string;
+    feePayer?: 'seller' | 'buyer';
   }) => call<Trade>('/api/trades', { method: 'POST', body: JSON.stringify(body) }),
 
   myTrades: () => call<Trade[]>('/api/trades'),

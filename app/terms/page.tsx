@@ -5,7 +5,7 @@ import { ArrowLeft } from '@/components/icons';
 
 export const metadata: Metadata = {
   title: 'Terms of Service — Clasp',
-  description: 'Clasp is non-custodial escrow for Pi commerce. It never holds funds, never decides disputes, never reverses a transaction.',
+  description: 'Clasp is a custodial escrow service for Pi commerce. It holds the buyer’s payment until delivery is confirmed and never decides disputes by operator judgment.',
 };
 
 const UPDATED = 'June 2026';
@@ -25,26 +25,26 @@ export default function TermsPage() {
       <p className="text-[13px] text-faint mt-1">Last updated: {UPDATED}</p>
 
       <Section title="What Clasp is">
-        <p>Clasp is non-custodial escrow infrastructure for the Pi Network. It provides a smart contract that locks Pi until delivery is confirmed, plus an app and API to use it. <b>Clasp is not a marketplace, a bank, or a custodian.</b></p>
+        <p>Clasp is a <b>custodial escrow service</b> for the Pi Network. It holds the buyer’s payment and both parties’ bonds in a secured Clasp app wallet until the trade reaches an outcome, then releases the funds strictly according to the published rules below. Clasp is not a marketplace or a bank, and does not give financial advice.</p>
       </Section>
 
       <Section title="What Clasp does not do">
-        <Bullet>It never holds your funds. Pi only ever sits inside the on-chain contract.</Bullet>
-        <Bullet>It never decides disputes. Outcomes are determined by you, your counterparty, and the contract’s deadline rules — never by an operator.</Bullet>
-        <Bullet>It never reverses, freezes, or claws back a transaction.</Bullet>
+        <Bullet>It does not spend, lend, or invest the funds it holds in escrow. They are held only to settle your trade.</Bullet>
+        <Bullet>It never decides disputes by judgment. Outcomes are determined by you, your counterparty, and Clasp’s published deadline rules — never by an operator’s opinion.</Bullet>
+        <Bullet>It never reverses, freezes, or seizes funds outside those outcome rules.</Bullet>
       </Section>
 
       <Section title="Bonds">
-        <p>Both parties post a refundable performance bond (15% of the price, floor 1 Pi). Bonds are returned on any honest outcome. In the “nuclear” outcome (no settlement reached in time), both bonds are burned to a provably unspendable address — never collected by the operator.</p>
+        <p>Both parties post a refundable security bond (15% of the price, floor 1 Pi) — the seller at creation, the buyer when funding. Bonds are returned on any honest outcome. If no settlement is reached in time (the “nuclear” outcome), both bonds are forfeited and are not returned to either party.</p>
       </Section>
 
-      <Section title="Fees">
-        <p>A 1.5% fee (minimum 0.05 Pi) is charged by the contract on the amount released to the seller, and only when a trade completes or settles. There are no fees on disputes, refunds, or cancellations.</p>
+      <Section title="Platform fee">
+        <p>A 1.5% platform fee (minimum 0.05 Pi) applies only when a trade completes or settles — never on disputes, refunds, or cancellations. The fee is separate from the bond and from the item price. At creation the seller chooses who pays it (seller or buyer); it is shown as its own line before anyone pays.</p>
       </Section>
 
       <Section title="Your responsibilities">
-        <Bullet>Verify the official contract address (shown in-app under “How your money stays safe”). Clasp never requests payment via direct message.</Bullet>
-        <Bullet>Ship and confirm within the agreed windows. Missing a deadline triggers an automatic, permissionless on-chain outcome that nobody can override.</Bullet>
+        <Bullet>Only ever transact through the official Clasp app at claspescrow.com (and its official PiNet entry). Clasp never requests payment via direct message.</Bullet>
+        <Bullet>Ship and confirm within the agreed windows. Missing a deadline triggers an automatic outcome under Clasp’s rules that the counterparty cannot override.</Bullet>
       </Section>
 
       <Section title="Acceptable use">
@@ -52,7 +52,7 @@ export default function TermsPage() {
       </Section>
 
       <Section title="No warranty">
-        <p>The service is provided “as is”, without warranties of any kind. Smart contracts carry inherent risk; trade amounts are capped at launch to bound exposure. Use at your own discretion. To the maximum extent permitted by law, the operator is not liable for losses arising from your use of the service or from the behaviour of your counterparty.</p>
+        <p>The service is provided “as is”, without warranties of any kind. Holding funds in custody and on-chain transfers carry inherent risk; trade amounts are capped at launch to bound exposure. Use at your own discretion. To the maximum extent permitted by law, the operator is not liable for losses arising from your use of the service or from the behaviour of your counterparty.</p>
       </Section>
 
       <Section title="Contact">

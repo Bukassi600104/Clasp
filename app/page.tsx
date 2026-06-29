@@ -44,23 +44,23 @@ function Landing() {
 
       <div className="px-5 pt-10 flex-1">
         <span className="chip bg-brand-soft text-brand-dark">
-          <Shield width={14} height={14} /> Non-custodial escrow on Pi
+          <Shield width={14} height={14} /> Escrow protected on Pi
         </span>
         <h1 className="mt-5 font-display text-[34px] leading-[1.08] font-semibold tracking-tight">
           Sell anywhere.<br />Get paid safely.
         </h1>
         <p className="mt-4 text-[16px] leading-relaxed text-muted">
-          Your Pi locks in a smart contract and releases only when delivery is
-          confirmed. Nobody holds the money but the blockchain — not even us.
+          Clasp holds your Pi safely in escrow and releases it only when delivery
+          is confirmed. The seller can&apos;t touch it until you do.
         </p>
 
         <div className="mt-8 space-y-3">
-          <TrustPoint Icon={Lock} title="Funds locked, not held"
-            body="Payment sits inside the contract. The seller can't touch it until you confirm." />
+          <TrustPoint Icon={Lock} title="Held in escrow until you confirm"
+            body="Clasp holds the payment until you confirm delivery. The seller can't reach it before then." />
           <TrustPoint Icon={Scale} title="No human judges, ever"
-            body="Disputes resolve by incentive design and on-chain settlement — never an operator's opinion." />
+            body="Disputes resolve by incentive design and a split you and the seller agree — never an operator's opinion." />
           <TrustPoint Icon={Spark} title="A no-show means an automatic refund"
-            body="If the seller never ships, the contract returns your Pi and bond in full." />
+            body="If the seller never ships, Clasp returns your Pi and bond in full." />
         </div>
       </div>
 

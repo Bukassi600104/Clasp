@@ -244,6 +244,7 @@ export interface CreateArgs {
   shipWindowS: number;
   inspectWindowS: number;
   memo: string;
+  feePayer?: 'seller' | 'buyer';
   partnerId?: string | null;
   ref?: string | null;
   idempotencyKey?: string | null;
@@ -263,6 +264,7 @@ export async function createTrade(args: CreateArgs): Promise<Trade> {
     buyer_bond_micro: bond.toString(),
     seller_bond_micro: bond.toString(),
     fee_micro: feeFor(args.amountMicro).toString(),
+    fee_payer: args.feePayer ?? 'seller',
     memo: args.memo,
     ship_window_s: args.shipWindowS,
     inspect_window_s: args.inspectWindowS,

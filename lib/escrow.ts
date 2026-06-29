@@ -92,9 +92,19 @@ export function feeFor(releasedToSeller: bigint): bigint {
   return pct > PARAMS.FEE_MIN ? pct : PARAMS.FEE_MIN;
 }
 
-/** Buyer locks price + buyer bond at funding. */
-export function buyerLockTotal(amountMicro: bigint): bigint {
-  return amountMicro + bondFor(amountMicro);
+/** Who pays the separate 1.5% platform fee — chosen by the seller at creation.
+ *  The bond is unrelated: BOTH parties always post a bond as security. */
+export type FeePayer = 'seller' | 'buyer';
+
+/** Seller locks their security bond at creation (collected via Pi at that point). */
+export function sellerLockTotal(amountMicro: bigint): bigint {
+  return bondFor(amountMicro);
+}
+
+/** Buyer locks price + their security bond at funding, PLUS the platform fee when
+ *  the buyer is the one paying it (added on top — never carved out of the price). */
+export function buyerLockTotal(amountMicro: bigint, feePayer: FeePayer = 'seller'): bigint {
+  return amountMicro + bondFor(amountMicro) + (feePayer === 'buyer' ? feeFor(amountMicro) : 0n);
 }
 
 // ── Settlement / payout outcomes ─────────────────────────────────────────────
@@ -105,24 +115,32 @@ export interface Payout {
   burned: bigint;
 }
 
-/** COMPLETED: seller gets price − fee; both bonds returned. */
-export function completedPayout(amountMicro: bigint): Payout {
+/**
+ * COMPLETED: the operator takes the fee; the seller gets the price (less the fee
+ * only if the SELLER is the one paying it) plus their bond back; the buyer gets
+ * their bond back. Solvent against what was collected (seller bond + price +
+ * buyer bond + buyer-paid fee).
+ */
+export function completedPayout(amountMicro: bigint, feePayer: FeePayer = 'seller'): Payout {
   const fee = feeFor(amountMicro);
   const bond = bondFor(amountMicro);
+  const proceeds = feePayer === 'seller' ? amountMicro - fee : amountMicro;
   return {
-    sellerReceives: amountMicro - fee + bond, // proceeds + own bond back
+    sellerReceives: proceeds + bond,
     buyerReceives: bond, // buyer bond back
     operatorFee: fee,
     burned: 0n,
   };
 }
 
-/** REFUNDED: buyer gets price + buyer bond back; seller bond returned. */
-export function refundedPayout(amountMicro: bigint): Payout {
+/** REFUNDED: the trade failed — no fee. Buyer gets price + bond + any fee they
+ *  pre-paid; seller gets their bond back. */
+export function refundedPayout(amountMicro: bigint, feePayer: FeePayer = 'seller'): Payout {
   const bond = bondFor(amountMicro);
+  const buyerPrepaidFee = feePayer === 'buyer' ? feeFor(amountMicro) : 0n;
   return {
     sellerReceives: bond, // seller bond back only
-    buyerReceives: amountMicro + bond, // price + buyer bond
+    buyerReceives: amountMicro + bond + buyerPrepaidFee, // price + bond + refunded fee
     operatorFee: 0n,
     burned: 0n,
   };
@@ -131,32 +149,37 @@ export function refundedPayout(amountMicro: bigint): Payout {
 /**
  * SETTLED: principal split per accepted proposal (sellerPct of the price to the
  * seller). Fee taken only on the portion released to the seller. Both bonds
- * returned. Dust → buyer (PRD §8.4(6)).
+ * returned. If the buyer pre-paid the full fee, the unused part is refunded.
+ * Dust → buyer (PRD §8.4(6)).
  */
-export function settledPayout(amountMicro: bigint, sellerPct: bigint): Payout {
+export function settledPayout(amountMicro: bigint, sellerPct: bigint, feePayer: FeePayer = 'seller'): Payout {
   const sellerPrincipal = (amountMicro * sellerPct) / 100n;
-  const fee = feeFor(sellerPrincipal);
+  const fee = feeFor(sellerPrincipal); // fee on the portion released to the seller
   const bond = bondFor(amountMicro);
   const buyerPrincipal = amountMicro - sellerPrincipal; // remainder incl. dust → buyer
+  const buyerPrepaidFee = feePayer === 'buyer' ? feeFor(amountMicro) : 0n;
+  const buyerFeeRefund = buyerPrepaidFee > fee ? buyerPrepaidFee - fee : 0n;
   return {
-    sellerReceives: sellerPrincipal - fee + bond,
-    buyerReceives: buyerPrincipal + bond,
+    sellerReceives: sellerPrincipal - (feePayer === 'seller' ? fee : 0n) + bond,
+    buyerReceives: buyerPrincipal + bond + buyerFeeRefund,
     operatorFee: fee,
     burned: 0n,
   };
 }
 
 /**
- * NUCLEAR: both bonds burned; principal split 50/50. Dust → buyer.
+ * NUCLEAR: both bonds forfeited; principal split 50/50. Dust → buyer. No fee
+ * (trade failed) — any fee the buyer pre-paid is refunded.
  * Designed never to execute; exists to make settlement the only rational outcome.
  */
-export function nuclearPayout(amountMicro: bigint): Payout {
+export function nuclearPayout(amountMicro: bigint, feePayer: FeePayer = 'seller'): Payout {
   const sellerHalf = amountMicro / 2n; // floor; dust to buyer
   const buyerHalf = amountMicro - sellerHalf;
   const bond = bondFor(amountMicro);
+  const buyerPrepaidFee = feePayer === 'buyer' ? feeFor(amountMicro) : 0n;
   return {
     sellerReceives: sellerHalf,
-    buyerReceives: buyerHalf,
+    buyerReceives: buyerHalf + buyerPrepaidFee,
     operatorFee: 0n,
     burned: bond * 2n,
   };

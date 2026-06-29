@@ -16,7 +16,7 @@ const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono', displ
 export const metadata: Metadata = {
   title: 'Clasp — Sell anywhere, get paid safely',
   description:
-    'The payment trust layer for Pi commerce. Funds lock in a smart contract and release only when delivery is confirmed. Nobody holds the money but the blockchain.',
+    'The payment trust layer for Pi commerce. Clasp holds your payment in escrow and releases it only when delivery is confirmed.',
   applicationName: 'Clasp',
   formatDetection: { telephone: false },
 };
