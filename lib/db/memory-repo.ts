@@ -3,7 +3,7 @@ import type { Repo } from './repo';
 import { normalizeProfile } from './repo';
 import type {
   Trade, TradeEvent, SettlementProposal, Evidence, AppNotification, Profile,
-  Partner, WebhookDelivery, Rating,
+  Partner, WebhookDelivery, Rating, Payout,
 } from '../types';
 import { isTerminal } from '../escrow';
 import { DEFAULT_LIMIT_MICRO } from '../tiers';
@@ -23,6 +23,7 @@ export class MemoryRepo implements Repo {
   private partners = new Map<string, Partner>();
   private deliveries = new Map<string, WebhookDelivery>();
   private ratings: Rating[] = [];
+  private payouts = new Map<string, Payout>();
 
   async upsertUser(uid: string, username: string): Promise<Profile> {
     let p = this.profiles.get(uid);
@@ -122,6 +123,21 @@ export class MemoryRepo implements Repo {
   async markNotificationsRead(uid: string) {
     const now = new Date().toISOString();
     for (const n of this.notifications) if (n.uid === uid && !n.read_at) n.read_at = now;
+  }
+
+  async addPayout(p: Payout) { this.payouts.set(p.id, { ...p }); }
+  async getPayout(id: string) {
+    const p = this.payouts.get(id);
+    return p ? { ...p } : null;
+  }
+  async savePayout(p: Payout) { this.payouts.set(p.id, { ...p }); }
+  async listPendingPayouts() {
+    return [...this.payouts.values()].filter((p) => p.status === 'pending')
+      .map((p) => ({ ...p }))
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  }
+  async listPayoutsForTrade(tradeId: string) {
+    return [...this.payouts.values()].filter((p) => p.trade_id === tradeId).map((p) => ({ ...p }));
   }
 
   async insertPartner(p: Partner) { this.partners.set(p.id, { ...p }); }

@@ -1,7 +1,7 @@
 import 'server-only';
 import type {
   Trade, TradeEvent, SettlementProposal, Evidence, AppNotification, Profile,
-  Partner, WebhookDelivery, Rating,
+  Partner, WebhookDelivery, Rating, Payout,
 } from '../types';
 import { DEFAULT_LIMIT_MICRO } from '../tiers';
 import { firebaseConfigured } from '../firebase';
@@ -70,6 +70,13 @@ export interface Repo {
   addNotification(n: AppNotification): Promise<void>;
   listNotifications(uid: string): Promise<AppNotification[]>;
   markNotificationsRead(uid: string): Promise<void>;
+
+  // payouts (custodial App-to-User settlement)
+  addPayout(p: Payout): Promise<void>;
+  getPayout(id: string): Promise<Payout | null>;
+  savePayout(p: Payout): Promise<void>;
+  listPendingPayouts(): Promise<Payout[]>;
+  listPayoutsForTrade(tradeId: string): Promise<Payout[]>;
 
   // partners + webhooks (public API)
   insertPartner(p: Partner): Promise<void>;

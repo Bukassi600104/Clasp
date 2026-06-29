@@ -3,7 +3,7 @@ import type { Repo } from './repo';
 import { normalizeProfile } from './repo';
 import type {
   Trade, TradeEvent, SettlementProposal, Evidence, AppNotification, Profile,
-  Partner, WebhookDelivery, Rating,
+  Partner, WebhookDelivery, Rating, Payout,
 } from '../types';
 import { NON_TERMINAL } from '../escrow';
 import { DEFAULT_LIMIT_MICRO } from '../tiers';
@@ -135,6 +135,23 @@ export class FirestoreRepo implements Repo {
     const batch = this.c.batch();
     q.docs.forEach((d) => batch.update(d.ref, { read_at: now }));
     if (q.size) await batch.commit();
+  }
+
+  // ── payouts ──
+  async addPayout(p: Payout) { await this.c.collection('payouts').doc(p.id).set(p); }
+  async getPayout(id: string) {
+    const snap = await this.c.collection('payouts').doc(id).get();
+    return snap.exists ? (snap.data() as Payout) : null;
+  }
+  async savePayout(p: Payout) { await this.c.collection('payouts').doc(p.id).set(p); }
+  async listPendingPayouts() {
+    const q = await this.c.collection('payouts').where('status', '==', 'pending').get();
+    return q.docs.map((d) => d.data() as Payout)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  }
+  async listPayoutsForTrade(tradeId: string) {
+    const q = await this.c.collection('payouts').where('trade_id', '==', tradeId).get();
+    return q.docs.map((d) => d.data() as Payout);
   }
 
   // ── partners + webhooks ──

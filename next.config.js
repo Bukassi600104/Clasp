@@ -2,6 +2,11 @@
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // The A2U payout SDK (pi-backend → stellar-sdk) is server-only and heavy; keep
+  // Next from bundling it so the serverless function loads it natively at runtime.
+  experimental: {
+    serverComponentsExternalPackages: ['pi-backend', 'stellar-sdk', '@stellar/stellar-sdk'],
+  },
   async headers() {
     return [
       {

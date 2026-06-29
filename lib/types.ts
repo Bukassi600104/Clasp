@@ -114,6 +114,26 @@ export interface RatingSummary {
   count: number;
 }
 
+/** A custodial App-to-User payout owed to a party once a trade settles. One per
+ *  (trade, role); id = `${trade_id}:${role}` makes enqueue/settlement idempotent.
+ *  The resumable create→submit→complete cycle persists payment_id then txid so a
+ *  retry never creates a second on-chain payment (no double-pay). */
+export interface Payout {
+  id: string;
+  trade_id: string;
+  role: 'seller' | 'buyer';
+  uid: string;
+  amount_micro: string;
+  reason: 'completed' | 'refunded' | 'settled' | 'nuclear';
+  status: 'pending' | 'paid' | 'failed';
+  payment_id: string | null;
+  txid: string | null;
+  error: string | null;
+  attempts: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SessionUser {
   uid: string;
   username: string;

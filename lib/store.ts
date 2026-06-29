@@ -12,6 +12,7 @@ import type {
 } from './types';
 import { repo } from './db/repo';
 import { dispatchWebhook } from './webhooks';
+import { enqueuePayoutsForTrade } from './payouts';
 
 /**
  * Escrow orchestration layer. Loads/persists via the repository (Firestore or
@@ -383,6 +384,7 @@ export async function acceptSettlement(id: string, accepterUid: string, proposal
   await repo().saveProposal({ ...proposal, status: 'accepted' });
   t.state = 'SETTLED';
   await save(t);
+  await enqueuePayoutsForTrade(t); // split per the accepted proposal + bonds back
   await emit(t, 'trade.settled', 'DISPUTED', 'SETTLED', { seller_pct: proposal.seller_pct });
   await notify(t.seller_uid, t, 'settled', 'Dispute settled', `Agreed split: ${proposal.seller_pct}% to seller. Funds released by the contract.`);
   await notify(t.buyer_uid, t, 'settled', 'Dispute settled', `Agreed split: ${100 - proposal.seller_pct}% refunded to you. Bonds returned.`);
@@ -453,6 +455,7 @@ export async function addEvidence(id: string, uploaderUid: string, storagePath: 
 async function complete(t: Trade, reason: 'manual' | 'silence') {
   t.state = 'COMPLETED';
   await save(t);
+  await enqueuePayoutsForTrade(t); // owe seller proceeds + buyer bond
   await emit(t, 'trade.completed', 'SHIPPED', 'COMPLETED', { reason });
   await bumpCompletion(t);
   await notify(t.seller_uid, t, 'completed', 'Trade complete — you got paid', reason === 'silence'
@@ -498,6 +501,7 @@ async function advanceTimeouts(t: Trade): Promise<Trade> {
   if (t.state === 'FUNDED' && passed(t.ship_deadline)) {
     t.state = 'REFUNDED';
     await save(t);
+    await enqueuePayoutsForTrade(t); // refund buyer price + bond, return seller bond
     await emit(t, 'trade.refunded', 'FUNDED', 'REFUNDED', { by: 'timeout' });
     await notify(t.buyer_uid, t, 'refunded', 'Auto-refunded — seller no-show', 'The seller missed the ship window. Your payment and bond were returned in full.');
     await notify(t.seller_uid, t, 'refunded', 'Trade refunded', 'You missed the ship window, so the buyer was refunded. Your seller bond was returned.');
@@ -510,6 +514,7 @@ async function advanceTimeouts(t: Trade): Promise<Trade> {
   if (t.state === 'DISPUTED' && passed(t.settlement_deadline)) {
     t.state = 'NUCLEAR';
     await save(t);
+    await enqueuePayoutsForTrade(t); // 50/50 principal split; bonds stay (burned)
     await emit(t, 'trade.nuclear', 'DISPUTED', 'NUCLEAR', {});
     await notify(t.seller_uid, t, 'nuclear', 'Nuclear outcome', 'No settlement was reached. Both bonds were burned and the principal split 50/50.');
     await notify(t.buyer_uid, t, 'nuclear', 'Nuclear outcome', 'No settlement was reached. Both bonds were burned and the principal split 50/50.');
