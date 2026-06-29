@@ -27,21 +27,21 @@ async function recipientsFor(
   };
 
   if (trade.state === 'COMPLETED') {
-    const p = completedPayout(amount);
+    const p = completedPayout(amount, trade.fee_payer);
     add('seller', trade.seller_uid, p.sellerReceives);
     add('buyer', trade.buyer_uid, p.buyerReceives);
   } else if (trade.state === 'REFUNDED') {
-    const p = refundedPayout(amount);
+    const p = refundedPayout(amount, trade.fee_payer);
     add('buyer', trade.buyer_uid, p.buyerReceives);
     add('seller', trade.seller_uid, p.sellerReceives);
   } else if (trade.state === 'SETTLED') {
     const proposals = await repo().listProposals(trade.id);
     const accepted = proposals.find((p) => p.status === 'accepted');
-    const p = settledPayout(amount, BigInt(accepted?.seller_pct ?? 0));
+    const p = settledPayout(amount, BigInt(accepted?.seller_pct ?? 0), trade.fee_payer);
     add('seller', trade.seller_uid, p.sellerReceives);
     add('buyer', trade.buyer_uid, p.buyerReceives);
   } else if (trade.state === 'NUCLEAR') {
-    const p = nuclearPayout(amount);
+    const p = nuclearPayout(amount, trade.fee_payer);
     add('seller', trade.seller_uid, p.sellerReceives);
     add('buyer', trade.buyer_uid, p.buyerReceives);
   }
