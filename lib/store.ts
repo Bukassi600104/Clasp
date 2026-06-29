@@ -291,6 +291,10 @@ async function getOrThrow(id: string): Promise<Trade> {
 
 export async function fundTrade(id: string, buyerUid: string, buyerUsername: string, txid?: string): Promise<Trade> {
   const t = await getOrThrow(id);
+  // Idempotent replay: Pi (or the client) can re-send completion for the same
+  // payment. If this buyer already funded it, return the recorded trade instead
+  // of throwing — a successful retry must never look like a failure or lose data.
+  if (t.state === 'FUNDED' && t.buyer_uid === buyerUid) return t;
   if (t.state !== 'CREATED') throw new TransitionError('This trade can no longer be funded.');
   if (passed(t.funding_deadline)) throw new TransitionError('The funding window has expired.');
   if (buyerUid === t.seller_uid) throw new TransitionError('You cannot fund your own trade.');
