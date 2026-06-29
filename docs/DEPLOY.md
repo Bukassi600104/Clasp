@@ -1,5 +1,10 @@
 # Clasp — Deployment Runbook
 
+**Production domain:** `https://claspescrow.com` (custom domain on the Vercel
+`clasp` project). This is the URL registered in the Pi Developer Portal and the
+one the Pi SDK runs under, so payments bind to the app verified for this domain.
+The `*.vercel.app` deployment URLs still work but are not the canonical/Pi URL.
+
 End-to-end: Firebase (data) → Vercel (app + cron) → Pi Developer Portal (auth +
 payments) → Soroban contract (funds). Do it on **testnet first**, pass the PRD
 §12 gates, then repeat for mainnet.
@@ -52,7 +57,10 @@ reminders + webhook retries). Confirm `GET /api/health` shows
 In **Pi Browser → `pi://develop.pi`**:
 1. **New App** → choose **App Network = Pi Testnet** (permanent; make a separate
    Mainnet app later).
-2. Set the hosting URL to your Vercel production URL.
+2. Set the hosting URL to `https://claspescrow.com` (the custom domain), and add
+   it as the app's verified domain. Use ONE app for this domain: its API Key,
+   its Validation Key, and this URL must all belong to the same app, or payments
+   404 (`payment_not_found`) at approve time.
 3. Copy the **API Key** → `vercel env add PI_API_KEY` → redeploy.
 4. **Domain validation:** copy the validation key →
    `vercel env add PI_VALIDATION_KEY` → redeploy → confirm it serves at

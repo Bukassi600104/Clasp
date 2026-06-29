@@ -13,6 +13,11 @@ operator ever decides an outcome or touches the funds**.
 This repository is the **reference app + public API** (Layers 2 & 3 of the
 [PRD](./PIBRIDGE-ESCROW-PRD.md)). It is a Pi Browser web app built with Next.js.
 
+**Production:** [`https://claspescrow.com`](https://claspescrow.com) — the custom
+domain registered + verified in the Pi Developer Portal. The Pi SDK runs under
+this domain, so it must match the app whose `PI_API_KEY` / `PI_VALIDATION_KEY`
+are configured in Vercel.
+
 ---
 
 ## Stack

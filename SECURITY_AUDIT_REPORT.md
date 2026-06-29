@@ -29,7 +29,7 @@ Pi embeds the app in a **third-party iframe** on `pinet.com`, which dominates th
 | C1 | Session cookie dropped in mobile Pi Browser (3rd-party iframe) → login fails | `lib/session.ts` | A05 | ✅ FIXED |
 
 #### C1: Third-party cookie blocked on mobile (the login bug)
-**Impact:** Pi serves Clasp via `<iframe src="clasp-lyart.vercel.app">` under top-level `pinet.com`,
+**Impact:** Pi serves Clasp via `<iframe src="claspescrow.com">` under top-level `pinet.com`,
 making the session cookie third-party. Mobile Pi Browser blocks third-party cookies by default, so
 after a successful Pi sign-in the cookie was never stored/sent — `/api/me` saw no session and the app
 appeared to "connect then stop." Desktop worked only because its webview allows third-party cookies.
@@ -143,3 +143,57 @@ counter) limiter — e.g. 10 auth attempts/min/IP, 60 trades/hour/key.
 - Formal verification or economic-exploit analysis of the Soroban contract (separate audit per §12).
 - Pi Platform-side configuration and the `pinet.com` proxy/iframe internals (out of our control).
 - Infrastructure/network policies on Vercel and Firebase beyond app-level config.
+
+---
+
+# Follow-up Audit — 2026-06-27 (payment-failure RCA + hardening)
+
+**Trigger:** Pi payments failing in production with *"the developer has failed to
+approve this payment."* Investigation used live Vercel runtime logs (CLI authed).
+
+## Root cause of the payment failure (the headline finding)
+`POST /api/payments/approve` was returning **500** on every attempt. Full server log:
+
+```
+[clasp] approve START payment=K0xJ4QWbj1VJav6Nsio1enZ80rTC trade=9858f391-… expected=74.75
+[clasp] unhandled error: Error: getPayment failed (404).
+```
+
+`GET https://api.minepi.com/v2/payments/{id}` (with `Authorization: Key PI_API_KEY`)
+returns **404** — the key authenticates (else 401) but the payment is **not visible
+to it**. Cause: **`PI_API_KEY` belongs to a different Pi Developer Portal app /
+network than the one that created the payment** in the user's Pi Browser. The
+approve POST therefore never lands, the wallet retries ~6× and times out.
+
+A secondary, self-inflicted cause was briefly introduced and removed during the
+investigation: `NEXT_PUBLIC_PI_SANDBOX=true` (it targets the desktop
+`sandbox.minepi.com` env, whose payments don't exist on the prod API → also 404).
+`NEXT_PUBLIC_PI_SANDBOX` does **not** select Testnet/Mainnet — portal registration
+does. Prod is back to `sandbox:false` (correct for Pi Browser).
+
+| # | Finding | Location | OWASP | Status |
+|---|---------|----------|-------|--------|
+| P1 | Payment approval 404 — `PI_API_KEY` ↔ portal-app/network mismatch | Vercel env `PI_API_KEY` | A05 | ⚠ REQUIRES MANUAL ACTION (portal) |
+| P2 | `sandbox` flag misconfig + misleading docs (true≠testnet) | env + `docs/DEPLOY.md`, `README.md`, `.env.example` | A05 | ✅ FIXED |
+
+**P1 manual action:** In the Pi Developer Portal, open the app whose hosting URL is
+`claspescrow.com`, copy **that** app's API Key, and set it as `PI_API_KEY` in
+Vercel (Testnet app → testnet key). Then `getPayment` returns 200 and approval works.
+
+## New hardening applied this pass
+| # | Finding | Location | OWASP | Status |
+|---|---------|----------|-------|--------|
+| F1 | Non-constant-time `ADMIN_SECRET` comparison (timing side-channel) | `app/api/admin/payments/route.ts` | A07 | ✅ FIXED (SHA-256 + `timingSafeEqual`) |
+| F2 | Approve 404 surfaced as opaque 500 → undiagnosable | `app/api/payments/approve/route.ts` | A09 | ✅ FIXED (explicit log + 502) |
+| F3 | New payment could open before a prior incomplete one was cleared (race) | `lib/pi-client.ts` | A04 | ✅ FIXED (await reconcile) |
+| F4 | Unbounded Pi API calls could hang the function past the approval window | `lib/pi-server.ts` | A04 | ✅ FIXED (12s timeout) |
+
+## Still-open recommendation (re-confirmed from prior audit)
+- **`/api/payments/incomplete` is unauthenticated and state-changing** (cancel/
+  complete by `paymentId`). It only affects this app's own payments and IDs are
+  unguessable capabilities, but it has no `requireSession` and no rate limit.
+  Adding `requireSession` would break the legitimate first-sign-in reconcile
+  (the callback fires before the session cookie is set), so this is left as a
+  tracked recommendation: add a per-IP rate limit (`limited()`), and/or gate on a
+  short-lived nonce. **REQUIRES MANUAL DECISION.**
+- M4 (rate limiting on trade/partner endpoints) from the 2026-06-22 audit remains.
