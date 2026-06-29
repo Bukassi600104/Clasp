@@ -402,6 +402,34 @@ export async function claimTimeout(id: string): Promise<Trade> {
   return getOrThrow(id);
 }
 
+/**
+ * Reactivate a trade that expired (funding window passed → auto-CANCELLED) or
+ * was cancelled before it was ever funded — instead of recreating it from
+ * scratch. Only the seller (the owner) may do this, only while CANCELLED and
+ * only if it was never funded (no buyer attached). Resets it to CREATED with a
+ * fresh funding window so the same link works again.
+ *
+ * SECURITY: never reactivate a trade that reached a *funded* terminal outcome
+ * (REFUNDED/NUCLEAR/COMPLETED/SETTLED) — those moved real value; the guard below
+ * only admits CANCELLED + no buyer, so funds can't be replayed.
+ */
+export async function reactivateTrade(id: string, byUid: string): Promise<Trade> {
+  const t = await getOrThrow(id);
+  if (t.state !== 'CANCELLED')
+    throw new TransitionError('Only a cancelled or expired trade can be reactivated.');
+  if (t.buyer_uid)
+    throw new TransitionError('A trade that was already funded cannot be reactivated.');
+  if (byUid !== t.seller_uid)
+    throw new TransitionError('Only the seller can reactivate their trade.');
+  t.state = 'CREATED';
+  t.funding_deadline = plus(PARAMS.FUNDING_WINDOW_S);
+  await save(t);
+  await emit(t, 'trade.reactivated', 'CANCELLED', 'CREATED', { by: 'seller' });
+  await notify(t.seller_uid, t, 'reactivated', 'Trade reactivated',
+    'Your trade is live again with a fresh 24h funding window. Share the link to get paid.');
+  return t;
+}
+
 /** Buyer or seller attaches dispute evidence (image path or note). */
 export async function addEvidence(id: string, uploaderUid: string, storagePath: string, caption: string | null): Promise<Evidence> {
   const t = await getOrThrow(id);

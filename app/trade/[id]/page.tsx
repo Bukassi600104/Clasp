@@ -114,6 +114,7 @@ export default function TradeDetailPage() {
           onDispute={() => act(() => api.dispute(trade.id))}
           onCancel={() => act(() => api.cancel(trade.id))}
           onTimeout={() => act(() => api.timeout(trade.id))}
+          onReactivate={() => act(() => api.reactivate(trade.id))}
         />
 
         {/* Share (seller, awaiting funding) */}
@@ -180,12 +181,27 @@ function Counterparty({
 
 /* ── Action region ── */
 function ActionRegion({
-  trade, isSeller, isBuyer, busy, onShip, onConfirm, onDispute, onCancel, onTimeout,
+  trade, isSeller, isBuyer, busy, onShip, onConfirm, onDispute, onCancel, onTimeout, onReactivate,
 }: {
   trade: Trade; isSeller: boolean; isBuyer: boolean; busy: boolean;
   onShip: () => void; onConfirm: () => void; onDispute: () => void; onCancel: () => void; onTimeout: () => void;
+  onReactivate: () => void;
 }) {
   const deadlinePassed = (d: string | null) => !!d && new Date(d).getTime() <= Date.now();
+
+  // CANCELLED / expired (never funded) — let the seller relist without recreating.
+  if (trade.state === 'CANCELLED' && isSeller && !trade.buyer_uid) {
+    return (
+      <div className="space-y-2">
+        <button onClick={onReactivate} disabled={busy} className="btn-primary w-full">
+          <ArrowRight width={18} height={18} /> Reactivate this trade
+        </button>
+        <p className="text-[12px] text-faint text-center">
+          Relists it with a fresh 24-hour funding window — the original link works again.
+        </p>
+      </div>
+    );
+  }
 
   // CREATED
   if (trade.state === 'CREATED') {
@@ -387,6 +403,7 @@ function labelFor(event: string): string {
     'trade.refunded': 'Auto-refunded',
     'trade.nuclear': 'Nuclear — bonds burned',
     'trade.cancelled': 'Trade cancelled',
+    'trade.reactivated': 'Trade reactivated — relisted',
   };
   return map[event] ?? event;
 }

@@ -71,6 +71,8 @@ export const api = {
 
   cancel: (id: string) => call<Trade>(`/api/trades/${id}/cancel`, { method: 'POST' }),
 
+  reactivate: (id: string) => call<Trade>(`/api/trades/${id}/reactivate`, { method: 'POST' }),
+
   timeout: (id: string) => call<Trade>(`/api/trades/${id}/timeout`, { method: 'POST' }),
 
   rate: (id: string, positive: boolean, comment?: string) =>
