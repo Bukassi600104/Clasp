@@ -7,8 +7,9 @@ import { useAuth } from '@/app/providers';
 import { api } from '@/lib/client-api';
 import type { Trade, TradeEvent, PublicStats, Rating } from '@/lib/types';
 import {
-  isTerminal, bondFor, buyerLockTotal, completedPayout, refundedPayout, nuclearPayout,
+  isTerminal, bondFor, buyerLockTotal, completedPayout, refundedPayout, nuclearPayout, microToPi,
 } from '@/lib/escrow';
+import { createPayment, isPiBrowser } from '@/lib/pi-client';
 import { formatPi, formatDate } from '@/lib/format';
 import { AppBar } from '@/components/chrome';
 import { StateBadge } from '@/components/state-badge';
@@ -33,6 +34,7 @@ export default function TradeDetailPage() {
   const [ratings, setRatings] = useState<Rating[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
   const [shipOpen, setShipOpen] = useState(false);
 
   const load = useCallback(async () => {
@@ -64,6 +66,41 @@ export default function TradeDetailPage() {
     try { await fn(); await load(); }
     catch (e) { setErr(e instanceof Error ? e.message : 'Action failed.'); }
     finally { setBusy(false); }
+  }
+
+  // Seller posts (or re-attempts) their security bond — the trade is not live and
+  // cannot be funded until this completes. Reuses the Pi payment flow; in
+  // sandbox/preview it records the bond without a real payment.
+  async function postBond() {
+    if (!trade) return;
+    setBusy(true); setErr(null);
+    try {
+      if (isPiBrowser()) {
+        setStatus('Posting your bond…');
+        await new Promise<void>((resolve, reject) => {
+          createPayment(
+            {
+              amount: microToPi(bondFor(BigInt(trade.amount_micro))),
+              memo: `Clasp bond · ${trade.memo}`.slice(0, 64),
+              metadata: { tradeId: trade.id, kind: 'seller_bond' },
+            },
+            {
+              onApprovalRequested: (pid) => api.approvePayment(pid, trade.id, 'seller_bond').then(() => undefined),
+              onCompletionRequested: (pid, txid) => api.completePayment(pid, txid, trade.id, 'seller_bond').then(() => resolve()),
+              onCancel: () => reject(new Error('Bond payment cancelled.')),
+              onError: (e) => reject(e),
+            }
+          );
+        });
+      } else {
+        await api.bond(trade.id);
+      }
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not post the bond.');
+    } finally {
+      setBusy(false); setStatus(null);
+    }
   }
 
   return (
@@ -115,10 +152,12 @@ export default function TradeDetailPage() {
           onCancel={() => act(() => api.cancel(trade.id))}
           onTimeout={() => act(() => api.timeout(trade.id))}
           onReactivate={() => act(() => api.reactivate(trade.id))}
+          onPostBond={postBond}
+          bondStatus={status}
         />
 
-        {/* Share (seller, awaiting funding) */}
-        {trade.state === 'CREATED' && isSeller && <ShareCard trade={trade} />}
+        {/* Share (seller, awaiting funding) — only after the seller bond is posted */}
+        {trade.state === 'CREATED' && isSeller && trade.seller_bond_paid !== false && <ShareCard trade={trade} />}
 
         {/* Progress */}
         <Timeline trade={trade} />
@@ -181,11 +220,11 @@ function Counterparty({
 
 /* ── Action region ── */
 function ActionRegion({
-  trade, isSeller, isBuyer, busy, onShip, onConfirm, onDispute, onCancel, onTimeout, onReactivate,
+  trade, isSeller, isBuyer, busy, onShip, onConfirm, onDispute, onCancel, onTimeout, onReactivate, onPostBond, bondStatus,
 }: {
   trade: Trade; isSeller: boolean; isBuyer: boolean; busy: boolean;
   onShip: () => void; onConfirm: () => void; onDispute: () => void; onCancel: () => void; onTimeout: () => void;
-  onReactivate: () => void;
+  onReactivate: () => void; onPostBond: () => void; bondStatus: string | null;
 }) {
   const deadlinePassed = (d: string | null) => !!d && new Date(d).getTime() <= Date.now();
 
@@ -206,11 +245,30 @@ function ActionRegion({
   // CREATED
   if (trade.state === 'CREATED') {
     if (isSeller) {
+      // The seller must post their security bond before the trade goes live.
+      if (trade.seller_bond_paid === false) {
+        return (
+          <div className="space-y-2">
+            <button onClick={onPostBond} disabled={busy} className="btn-primary w-full">
+              <Shield width={18} height={18} /> {busy ? (bondStatus ?? 'Working…') : `Post your ${formatPi(trade.seller_bond_micro)} security bond`}
+            </button>
+            <p className="text-[12px] text-faint text-center leading-relaxed">
+              This activates the trade. The buyer can’t pay until you post it — and it’s
+              returned in full when the trade completes.
+            </p>
+            <button onClick={onCancel} disabled={busy} className="btn-ghost w-full">Cancel trade</button>
+          </div>
+        );
+      }
       return (
         <div className="grid grid-cols-1 gap-2">
           <button onClick={onCancel} disabled={busy} className="btn-ghost w-full">Cancel trade</button>
         </div>
       );
+    }
+    // Buyer view — block paying an unbonded trade.
+    if (trade.seller_bond_paid === false) {
+      return <WaitingNote text="This trade isn’t active yet — the seller still needs to post their security bond." />;
     }
     return (
       <Link href={`/t/${trade.id}`} className="btn-primary w-full">
