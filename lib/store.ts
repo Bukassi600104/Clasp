@@ -265,6 +265,8 @@ export async function createTrade(args: CreateArgs): Promise<Trade> {
     seller_bond_micro: bond.toString(),
     fee_micro: feeFor(args.amountMicro).toString(),
     fee_payer: args.feePayer ?? 'seller',
+    seller_bond_paid: false,
+    seller_bond_txid: null,
     memo: args.memo,
     ship_window_s: args.shipWindowS,
     inspect_window_s: args.inspectWindowS,
@@ -285,6 +287,24 @@ export async function createTrade(args: CreateArgs): Promise<Trade> {
   return trade;
 }
 
+/**
+ * Mark a trade's seller security bond as posted (paid via Pi at creation, bound
+ * to its on-chain txid). Until this is set, the trade cannot be funded. Idempotent
+ * and seller-only; the bond amount is validated against the payment in the
+ * approve route before this runs.
+ */
+export async function bondTrade(id: string, sellerUid: string, txid?: string): Promise<Trade> {
+  const t = await getOrThrow(id);
+  if (sellerUid !== t.seller_uid) throw new TransitionError('Only the seller can post the seller bond.');
+  if (t.seller_bond_paid) return t; // already posted — idempotent replay
+  if (t.state !== 'CREATED') throw new TransitionError('This trade is past the bond stage.');
+  t.seller_bond_paid = true;
+  t.seller_bond_txid = txid ?? null;
+  await save(t);
+  await emit(t, 'trade.bonded', 'CREATED', 'CREATED', { txid, by: 'seller' });
+  return t;
+}
+
 // ── Transitions ──────────────────────────────────────────────────────────────
 async function getOrThrow(id: string): Promise<Trade> {
   const t = await repo().getTrade(id);
@@ -301,6 +321,7 @@ export async function fundTrade(id: string, buyerUid: string, buyerUsername: str
   if (t.state !== 'CREATED') throw new TransitionError('This trade can no longer be funded.');
   if (passed(t.funding_deadline)) throw new TransitionError('The funding window has expired.');
   if (buyerUid === t.seller_uid) throw new TransitionError('You cannot fund your own trade.');
+  if (t.seller_bond_paid === false) throw new TransitionError('The seller has not posted their security bond yet.');
   await ensureProfile(buyerUid, buyerUsername);
   t.buyer_uid = buyerUid;
   t.buyer_username = buyerUsername;
@@ -536,17 +557,19 @@ export async function seedDemo(uid: string, username: string) {
   await ensureProfile(uid, username);
   const P = PARAMS.AMOUNT_FLOOR;
 
-  await createTrade({
+  const t1 = await createTrade({
     sellerUid: uid, sellerUsername: username,
     amountMicro: P * 8n, shipWindowS: PARAMS.SHIP_DEFAULT_S, inspectWindowS: PARAMS.INSPECT_DEFAULT_S,
     memo: 'Custom phone case, matte black',
   });
+  await bondTrade(t1.id, uid, 'demo-bond-1');
 
   const t2 = await createTrade({
     sellerUid: 'pi_demo_chidi', sellerUsername: 'chidi_makes',
     amountMicro: P * 12n, shipWindowS: PARAMS.SHIP_DEFAULT_S, inspectWindowS: PARAMS.INSPECT_DEFAULT_S,
     memo: 'Hand-woven Aso-Oke fabric, 2 yards',
   });
+  await bondTrade(t2.id, 'pi_demo_chidi', 'demo-bond-2');
   await fundTrade(t2.id, uid, username, 'demo-tx-2');
 
   const t3 = await createTrade({
@@ -554,6 +577,7 @@ export async function seedDemo(uid: string, username: string) {
     amountMicro: P * 20n, shipWindowS: PARAMS.SHIP_DEFAULT_S, inspectWindowS: PARAMS.INSPECT_DEFAULT_S,
     memo: 'Bluetooth speaker, brand new',
   });
+  await bondTrade(t3.id, 'pi_demo_amaka', 'demo-bond-3');
   await fundTrade(t3.id, uid, username, 'demo-tx-3');
   await markShipped(t3.id, 'pi_demo_amaka', 'demo-evidence-hash');
   await openDispute(t3.id, uid);
@@ -564,6 +588,7 @@ export async function seedDemo(uid: string, username: string) {
     amountMicro: P * 6n, shipWindowS: PARAMS.SHIP_DEFAULT_S, inspectWindowS: PARAMS.INSPECT_DEFAULT_S,
     memo: 'Beaded necklace set',
   });
+  await bondTrade(t4.id, uid, 'demo-bond-4');
   await fundTrade(t4.id, 'pi_demo_ngozi', 'ngozi_buys', 'demo-tx-4');
   await markShipped(t4.id, uid, 'demo-evidence-4');
   await confirmReceipt(t4.id, 'pi_demo_ngozi');

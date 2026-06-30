@@ -406,6 +406,7 @@ function labelFor(event: string): string {
     'trade.nuclear': 'Nuclear — bonds burned',
     'trade.cancelled': 'Trade cancelled',
     'trade.reactivated': 'Trade reactivated — relisted',
+    'trade.bonded': 'Seller posted their security bond',
   };
   return map[event] ?? event;
 }

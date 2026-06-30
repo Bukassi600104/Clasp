@@ -15,6 +15,11 @@ export interface Trade {
   /** Who pays the separate 1.5% platform fee — chosen by the seller at creation.
    *  Absent on legacy trades → treated as 'seller' (fee carved from proceeds). */
   fee_payer?: 'seller' | 'buyer';
+  /** Whether the seller has posted their security bond (paid via Pi at creation).
+   *  New trades start false and become true once the bond payment completes; a
+   *  buyer cannot fund until it is true. Absent on legacy trades → treated as paid. */
+  seller_bond_paid?: boolean;
+  seller_bond_txid?: string | null;
   memo: string;
   ship_window_s: number;
   inspect_window_s: number;

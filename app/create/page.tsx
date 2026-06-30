@@ -7,6 +7,7 @@ import { AppBar } from '@/components/chrome';
 import { MoneyRow } from '@/components/money';
 import { TierBadge } from '@/components/tier-badge';
 import { api } from '@/lib/client-api';
+import { createPayment, isPiBrowser } from '@/lib/pi-client';
 import { PARAMS, piToMicro, bondFor, feeFor, microToPi } from '@/lib/escrow';
 import { limitLabel } from '@/lib/tiers';
 import { Shield, Truck, Clock, Info, TrendingUp } from '@/components/icons';
@@ -31,6 +32,7 @@ export default function CreatePage() {
   const [inspectWindowS, setInspect] = useState(PARAMS.INSPECT_DEFAULT_S);
   const [feePayer, setFeePayer] = useState<'seller' | 'buyer'>('buyer');
   const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   // Seller's earned per-trade ceiling + tier (replaces the old flat 50π cap).
   const [cap, setCap] = useState<{ micro: bigint | null; tier: { name: string; tone: string } } | null>(null);
@@ -71,8 +73,33 @@ export default function CreatePage() {
         memo: memo.trim(),
         feePayer,
       });
+      // Collect the seller's security bond before the trade can be funded.
+      if (isPiBrowser()) {
+        setStatus('Posting your seller bond…');
+        await new Promise<void>((resolve, reject) => {
+          createPayment(
+            {
+              amount: microToPi(sellerBond),
+              memo: `Clasp bond · ${memo.trim()}`.slice(0, 64),
+              metadata: { tradeId: trade.id, kind: 'seller_bond' },
+            },
+            {
+              onApprovalRequested: (pid) =>
+                api.approvePayment(pid, trade.id, 'seller_bond').then(() => undefined),
+              onCompletionRequested: (pid, txid) =>
+                api.completePayment(pid, txid, trade.id, 'seller_bond').then(() => resolve()),
+              onCancel: () => reject(new Error('Bond payment cancelled — trade not activated.')),
+              onError: (e) => reject(e),
+            }
+          );
+        });
+      } else {
+        // Sandbox / preview: post the bond without a real Pi payment.
+        await api.bond(trade.id);
+      }
       router.push(`/trade/${trade.id}?created=1`);
     } catch (e) {
+      setStatus(null);
       setErr(e instanceof Error ? e.message : 'Could not create the trade.');
       setBusy(false);
     }
@@ -214,7 +241,7 @@ export default function CreatePage() {
       <div className="sticky bottom-0 px-5 pt-4 pb-[max(env(safe-area-inset-bottom),18px)] bg-paper/92 backdrop-blur-md">
         <div className="hr mb-4" />
         <button onClick={submit} disabled={!valid || busy} className="btn-primary w-full">
-          {busy ? 'Creating…' : 'Create trade & get link'}
+          {busy ? (status ?? 'Creating…') : `Create trade & lock ${microToPi(sellerBond)} π bond`}
         </button>
         <p className="mt-2.5 flex items-center justify-center gap-1.5 text-[12px] text-faint">
           <Info width={13} height={13} /> A 1.5% fee applies only when a sale completes.

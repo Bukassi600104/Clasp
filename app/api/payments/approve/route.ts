@@ -3,12 +3,17 @@ import { z } from 'zod';
 import { requireSession } from '@/lib/session';
 import { getTrade } from '@/lib/store';
 import { getPayment, approvePayment } from '@/lib/pi-server';
-import { buyerLockTotal, microToPi } from '@/lib/escrow';
+import { buyerLockTotal, sellerLockTotal, microToPi } from '@/lib/escrow';
 import { handler, ok, fail } from '@/lib/api';
 
 export const dynamic = 'force-dynamic';
 
-const Body = z.object({ paymentId: z.string().min(4), tradeId: z.string().min(8) });
+const Body = z.object({
+  paymentId: z.string().min(4),
+  tradeId: z.string().min(8),
+  // 'seller_bond' = the seller posting their bond at creation; default funding.
+  kind: z.enum(['escrow_lock', 'seller_bond']).optional(),
+});
 
 /**
  * Server-side payment approval (PRD §11). We re-derive the expected lock amount
@@ -16,7 +21,7 @@ const Body = z.object({ paymentId: z.string().min(4), tradeId: z.string().min(8)
  * amount does not match — the client cannot dictate how much is locked.
  */
 export const POST = handler(async (req: NextRequest) => {
-  requireSession();
+  const session = requireSession();
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return fail('paymentId and tradeId are required.');
 
@@ -56,9 +61,15 @@ export const POST = handler(async (req: NextRequest) => {
     throw e;
   }
   if (!trade) return fail('Trade not found.', 404);
-  // Include the platform fee in the expected lock when the BUYER pays it, or the
-  // (larger) buyer payment would be rejected as a mismatch.
-  const expected = microToPi(buyerLockTotal(BigInt(trade.amount_micro), trade.fee_payer));
+  const isBond = parsed.data.kind === 'seller_bond';
+  if (isBond && session.uid !== trade.seller_uid) {
+    return fail('Only the seller can post the seller bond.', 403);
+  }
+  // Seller bond = just the bond; buyer funding = price + bond (+ fee if buyer pays).
+  const amountMicro = BigInt(trade.amount_micro);
+  const expected = microToPi(
+    isBond ? sellerLockTotal(amountMicro) : buyerLockTotal(amountMicro, trade.fee_payer)
+  );
   console.log(`[clasp] approve expected=${expected} payment.amount=${payment.amount} status=${JSON.stringify(payment.status)}`);
   if (Math.abs(payment.amount - expected) > 1e-6) {
     console.error(`[clasp] approve AMOUNT MISMATCH pi=${payment.amount} expected=${expected}`);

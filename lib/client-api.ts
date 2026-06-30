@@ -74,6 +74,9 @@ export const api = {
 
   reactivate: (id: string) => call<Trade>(`/api/trades/${id}/reactivate`, { method: 'POST' }),
 
+  /** Sandbox/preview: mark the seller bond posted without a real Pi payment. */
+  bond: (id: string) => call<Trade>(`/api/trades/${id}/bond`, { method: 'POST' }),
+
   timeout: (id: string) => call<Trade>(`/api/trades/${id}/timeout`, { method: 'POST' }),
 
   rate: (id: string, positive: boolean, comment?: string) =>
@@ -90,15 +93,15 @@ export const api = {
   notifications: () => call<AppNotification[]>('/api/notifications'),
   markRead: () => call<{ read: boolean }>('/api/notifications', { method: 'POST' }),
 
-  approvePayment: (paymentId: string, tradeId: string) =>
+  approvePayment: (paymentId: string, tradeId: string, kind?: 'escrow_lock' | 'seller_bond') =>
     call<{ approved: boolean }>('/api/payments/approve', {
       method: 'POST',
-      body: JSON.stringify({ paymentId, tradeId }),
+      body: JSON.stringify({ paymentId, tradeId, kind }),
     }),
 
-  completePayment: (paymentId: string, txid: string, tradeId: string) =>
+  completePayment: (paymentId: string, txid: string, tradeId: string, kind?: 'escrow_lock' | 'seller_bond') =>
     call<Trade>('/api/payments/complete', {
       method: 'POST',
-      body: JSON.stringify({ paymentId, txid, tradeId }),
+      body: JSON.stringify({ paymentId, txid, tradeId, kind }),
     }),
 };

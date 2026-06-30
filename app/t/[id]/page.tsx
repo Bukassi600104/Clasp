@@ -39,6 +39,10 @@ export default function CheckoutPage() {
     router.replace(`/trade/${trade.id}`);
     return <Centered>Opening your trade…</Centered>;
   }
+  // The seller must post their security bond before the trade can be funded.
+  if (trade.seller_bond_paid === false) {
+    return <Centered>This trade isn’t ready yet — the seller still needs to post their security bond.</Centered>;
+  }
 
   const amount = BigInt(trade.amount_micro);
   const buyerBond = bondFor(amount);

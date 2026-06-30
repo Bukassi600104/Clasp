@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { requireSession } from '@/lib/session';
-import { fundTrade } from '@/lib/store';
+import { fundTrade, bondTrade } from '@/lib/store';
 import { completePayment } from '@/lib/pi-server';
 import { handler, ok, fail } from '@/lib/api';
 
@@ -11,6 +11,7 @@ const Body = z.object({
   paymentId: z.string().min(4),
   txid: z.string().min(4),
   tradeId: z.string().min(8),
+  kind: z.enum(['escrow_lock', 'seller_bond']).optional(),
 });
 
 /**
@@ -38,8 +39,10 @@ export const POST = handler(async (req: NextRequest) => {
   // — the exact failure we hit. Log it loudly (with the reason) so it's never
   // silent, and so the next attempt is diagnosable from the server logs.
   try {
-    const trade = await fundTrade(parsed.data.tradeId, session.uid, session.username, parsed.data.txid);
-    console.log(`[clasp] complete FUNDED trade=${trade.id} state=${trade.state} buyer=${trade.buyer_uid} seller=${trade.seller_uid}`);
+    const trade = parsed.data.kind === 'seller_bond'
+      ? await bondTrade(parsed.data.tradeId, session.uid, parsed.data.txid)
+      : await fundTrade(parsed.data.tradeId, session.uid, session.username, parsed.data.txid);
+    console.log(`[clasp] complete ${parsed.data.kind === 'seller_bond' ? 'BONDED' : 'FUNDED'} trade=${trade.id} state=${trade.state} buyer=${trade.buyer_uid} seller=${trade.seller_uid}`);
     return ok(trade);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
