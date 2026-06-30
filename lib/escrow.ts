@@ -25,7 +25,7 @@ export function microToPi(micro: bigint): number {
 export const PARAMS = {
   AMOUNT_CAP: piToMicro(50), // launch cap, bounded blast radius
   AMOUNT_FLOOR: piToMicro(1),
-  BOND_PCT: 15n, // 15% of price
+  BOND_PCT: 10n, // 10% of price (security bond, posted by BOTH parties)
   BOND_FLOOR: piToMicro(1),
   FUNDING_WINDOW_S: 24 * 3600, // fixed 24h
   SHIP_MIN_S: 24 * 3600,
@@ -96,9 +96,12 @@ export function feeFor(releasedToSeller: bigint): bigint {
  *  The bond is unrelated: BOTH parties always post a bond as security. */
 export type FeePayer = 'seller' | 'buyer';
 
-/** Seller locks their security bond at creation (collected via Pi at that point). */
-export function sellerLockTotal(amountMicro: bigint): bigint {
-  return bondFor(amountMicro);
+/** Seller's up-front charge at creation: their security bond, PLUS the platform
+ *  commission when the seller is the chosen fee-payer. The commission is HELD in
+ *  escrow from this point and only released to the operator on completion (or
+ *  refunded if the trade fails) — it is never carved out of the seller's price. */
+export function sellerLockTotal(amountMicro: bigint, feePayer: FeePayer = 'seller'): bigint {
+  return bondFor(amountMicro) + (feePayer === 'seller' ? feeFor(amountMicro) : 0n);
 }
 
 /** Buyer locks price + their security bond at funding, PLUS the platform fee when
@@ -116,53 +119,50 @@ export interface Payout {
 }
 
 /**
- * COMPLETED: the operator takes the fee; the seller gets the price (less the fee
- * only if the SELLER is the one paying it) plus their bond back; the buyer gets
- * their bond back. Solvent against what was collected (seller bond + price +
- * buyer bond + buyer-paid fee).
+ * COMPLETED: the commission (held in escrow since it was paid up front) is now
+ * earned by the operator. ONLY the bonds are returned: the seller gets the full
+ * price + their bond back, the buyer gets their bond back. The fee was already
+ * collected up front (from the seller at creation or the buyer at funding), so it
+ * is not deducted again — it simply stays in the App Wallet. Solvent against what
+ * was collected (seller bond + (seller fee) + price + buyer bond + (buyer fee)).
  */
-export function completedPayout(amountMicro: bigint, feePayer: FeePayer = 'seller'): Payout {
-  const fee = feeFor(amountMicro);
+export function completedPayout(amountMicro: bigint, _feePayer: FeePayer = 'seller'): Payout {
   const bond = bondFor(amountMicro);
-  const proceeds = feePayer === 'seller' ? amountMicro - fee : amountMicro;
   return {
-    sellerReceives: proceeds + bond,
-    buyerReceives: bond, // buyer bond back
-    operatorFee: fee,
+    sellerReceives: amountMicro + bond, // full price + bond back
+    buyerReceives: bond,                // bond back
+    operatorFee: feeFor(amountMicro),   // held since payment; kept by the operator
     burned: 0n,
   };
 }
 
-/** REFUNDED: the trade failed — no fee. Buyer gets price + bond + any fee they
- *  pre-paid; seller gets their bond back. */
+/** REFUNDED: the trade failed — NO commission earned, so the held fee is refunded
+ *  to whoever pre-paid it. Buyer gets price + bond (+ their fee back); seller gets
+ *  their bond back (+ their fee back). */
 export function refundedPayout(amountMicro: bigint, feePayer: FeePayer = 'seller'): Payout {
   const bond = bondFor(amountMicro);
-  const buyerPrepaidFee = feePayer === 'buyer' ? feeFor(amountMicro) : 0n;
+  const fee = feeFor(amountMicro);
   return {
-    sellerReceives: bond, // seller bond back only
-    buyerReceives: amountMicro + bond + buyerPrepaidFee, // price + bond + refunded fee
+    sellerReceives: bond + (feePayer === 'seller' ? fee : 0n),
+    buyerReceives: amountMicro + bond + (feePayer === 'buyer' ? fee : 0n),
     operatorFee: 0n,
     burned: 0n,
   };
 }
 
 /**
- * SETTLED: principal split per accepted proposal (sellerPct of the price to the
- * seller). Fee taken only on the portion released to the seller. Both bonds
- * returned. If the buyer pre-paid the full fee, the unused part is refunded.
- * Dust → buyer (PRD §8.4(6)).
+ * SETTLED: a resolved trade — the commission is earned (kept by the operator).
+ * The price is split per the accepted proposal (sellerPct to the seller), and
+ * BOTH bonds are returned. Dust → buyer (PRD §8.4(6)).
  */
-export function settledPayout(amountMicro: bigint, sellerPct: bigint, feePayer: FeePayer = 'seller'): Payout {
+export function settledPayout(amountMicro: bigint, sellerPct: bigint, _feePayer: FeePayer = 'seller'): Payout {
   const sellerPrincipal = (amountMicro * sellerPct) / 100n;
-  const fee = feeFor(sellerPrincipal); // fee on the portion released to the seller
   const bond = bondFor(amountMicro);
   const buyerPrincipal = amountMicro - sellerPrincipal; // remainder incl. dust → buyer
-  const buyerPrepaidFee = feePayer === 'buyer' ? feeFor(amountMicro) : 0n;
-  const buyerFeeRefund = buyerPrepaidFee > fee ? buyerPrepaidFee - fee : 0n;
   return {
-    sellerReceives: sellerPrincipal - (feePayer === 'seller' ? fee : 0n) + bond,
-    buyerReceives: buyerPrincipal + bond + buyerFeeRefund,
-    operatorFee: fee,
+    sellerReceives: sellerPrincipal + bond,
+    buyerReceives: buyerPrincipal + bond,
+    operatorFee: feeFor(amountMicro), // held since payment; kept by the operator
     burned: 0n,
   };
 }
@@ -176,10 +176,11 @@ export function nuclearPayout(amountMicro: bigint, feePayer: FeePayer = 'seller'
   const sellerHalf = amountMicro / 2n; // floor; dust to buyer
   const buyerHalf = amountMicro - sellerHalf;
   const bond = bondFor(amountMicro);
-  const buyerPrepaidFee = feePayer === 'buyer' ? feeFor(amountMicro) : 0n;
+  const fee = feeFor(amountMicro);
   return {
-    sellerReceives: sellerHalf,
-    buyerReceives: buyerHalf + buyerPrepaidFee,
+    // trade failed → commission refunded to whoever pre-paid it; bonds forfeited.
+    sellerReceives: sellerHalf + (feePayer === 'seller' ? fee : 0n),
+    buyerReceives: buyerHalf + (feePayer === 'buyer' ? fee : 0n),
     operatorFee: 0n,
     burned: bond * 2n,
   };

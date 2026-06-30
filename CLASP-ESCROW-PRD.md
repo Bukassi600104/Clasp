@@ -16,28 +16,38 @@
 
 These are **independent** and must never be conflated.
 
-| | Security **Bond** | Platform **Fee** (commission) |
+| | Security **Bond** | Platform **Commission** |
 |---|---|---|
 | What | Good-faith deposit that keeps both sides honest | Clasp's revenue for facilitating the trade |
 | Who pays | **BOTH** the seller and the buyer | **One** party — chosen at creation |
-| Amount | 15% of price (floor 1 π) | 1.5% of price (floor 0.05 π) |
-| When charged | Posted up front, **returned in full** on every honest outcome | Taken **only** when a trade completes or settles |
-| Where it goes on success | Back to whoever posted it | Kept by Clasp (operator) |
+| Amount | **10% of price** (floor 1 π) | 1.5% of price (floor 0.05 π) |
+| When charged | Posted up front | Paid up front (with the bond) and **held in escrow** |
+| On success | **Bond returned in full** to whoever posted it | Released to Clasp (the App Wallet) **only on completion/settle** |
+| On failure (refund / nuclear) | Returned (or, in nuclear, forfeited) | **Refunded** to whoever pre-paid it — no commission on a failed trade |
 
-**Platform fee payer is selectable.** On the create screen the seller chooses
-**“Buyer pays”** (fee added on top of the price) or **“I’ll pay it”** (fee taken
-from the seller’s proceeds). The buyer↔seller agreement on who absorbs it is not
-Clasp’s concern; Clasp only records and enforces the selection.
+**Commission is never carved out of the price.** It is collected **separately and
+up front**, held in escrow, and released to the operator only when the trade
+succeeds. The seller always receives the **full item price** on completion.
 
-### Worked example — 60 π item (bond = 9 π, fee = 0.9 π)
+**Commission payer is selectable.** On the create screen the seller chooses
+**“I’ll pay it”** (commission added to the seller's up-front deposit) or **“Buyer
+pays”** (commission added to the buyer's funding). The buyer↔seller agreement on
+who absorbs it is not Clasp's concern; Clasp only records and enforces it.
 
-| | Seller pays fee | Buyer pays fee |
+### Worked example — 100 π item (bond = 10 π, commission = 1.5 π)
+
+| | Seller pays commission | Buyer pays commission |
 |---|---|---|
-| Seller posts at create | 9 π bond | 9 π bond |
-| Buyer locks at funding | 60 + 9 = **69 π** | 60 + 9 + 0.9 = **69.9 π** |
-| On completion → seller receives | 60 − 0.9 + 9 = **68.1 π** | 60 + 9 = **69 π** |
-| Buyer receives back | 9 π bond | 9 π bond |
-| Clasp keeps | 0.9 π | 0.9 π |
+| Seller pays at create | 10 bond + 1.5 = **11.5 π** | 10 bond = **10 π** |
+| Buyer pays at funding | 100 + 10 bond = **110 π** | 100 + 10 + 1.5 = **111.5 π** |
+| On completion → seller gets | 100 + 10 bond = **110 π** | 100 + 10 bond = **110 π** |
+| Buyer gets back | 10 bond | 10 bond |
+| Clasp keeps (App Wallet) | 1.5 | 1.5 |
+
+Net to the fee-payer is −1.5 either way; the bonds always round-trip. All amounts
+are integer micro-Pi (1 π = 1,000,000 µπ); dust rounds to the buyer. Canonical
+math: `lib/escrow.ts` (`bondFor`, `feeFor`, `sellerLockTotal`, `buyerLockTotal`,
+`completedPayout`, `refundedPayout`, `settledPayout`, `nuclearPayout`).
 
 All amounts are integer micro-Pi (1 π = 1,000,000 µπ); dust always rounds to the
 buyer. Canonical math lives in `lib/escrow.ts` (`bondFor`, `feeFor`,
@@ -50,10 +60,11 @@ buyer. Canonical math lives in `lib/escrow.ts` (`bondFor`, `feeFor`,
 
 **Both bonds are real, collected via Pi payments into the App Wallet.**
 
-1. **Create (seller).** Seller sets price, windows, memo, and the **fee payer**.
-   On submit the seller **pays their security bond** via Pi (U2A, `kind:
-   seller_bond`). The trade is created in `CREATED` but is **not live** —
-   `seller_bond_paid=false` — until that bond payment completes.
+1. **Create (seller).** Seller sets price, windows, memo, and the **commission
+   payer**. On submit the seller **pays their up-front deposit** via Pi (U2A,
+   `kind: seller_bond`) = their **10% bond + the 1.5% commission if the seller is
+   the payer** (`sellerLockTotal`). The trade is created in `CREATED` but is **not
+   live** — `seller_bond_paid=false` — until that payment completes.
    - The share link and “ready” state appear **only after** the bond is posted.
    - If the bond payment is cancelled/fails, the trade stays inactive and the
      seller is shown a **“Post your security bond”** action to retry. A buyer
@@ -75,14 +86,14 @@ buyer. Canonical math lives in `lib/escrow.ts` (`bondFor`, `feeFor`,
    `PI_WALLET_PRIVATE_SEED`). Each payout is idempotent per (trade, role) and
    resumable (create→submit→complete) so a retry never double-pays.
 
-### Settlement payouts
+### Settlement payouts (commission held up front; only bonds + price move here)
 
 | Outcome | Seller receives | Buyer receives | Clasp keeps | Bonds |
 |---|---|---|---|---|
-| COMPLETED | price (− fee if seller pays) + seller bond | buyer bond | fee | both returned |
-| REFUNDED | seller bond | price + buyer bond + any prepaid fee | 0 | both returned |
-| SETTLED (sellerPct) | sellerPct·price (− fee) + bond | rest + bond + fee refund | fee on seller’s share | both returned |
-| NUCLEAR | price/2 | price/2 + any prepaid fee | 0 | both forfeited |
+| COMPLETED | **full price + seller bond** | buyer bond | commission (held since payment) | both returned |
+| REFUNDED | seller bond (+ commission back if seller pre-paid) | price + buyer bond (+ commission back if buyer pre-paid) | 0 | both returned |
+| SETTLED (sellerPct) | sellerPct·price + seller bond | rest + buyer bond | commission | both returned |
+| NUCLEAR | price/2 (+ commission back if seller pre-paid) | price/2 (+ commission back if buyer pre-paid) | 0 | both forfeited |
 
 ---
 

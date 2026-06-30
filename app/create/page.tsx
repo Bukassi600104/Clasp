@@ -8,7 +8,7 @@ import { MoneyRow } from '@/components/money';
 import { TierBadge } from '@/components/tier-badge';
 import { api } from '@/lib/client-api';
 import { createPayment, isPiBrowser } from '@/lib/pi-client';
-import { PARAMS, piToMicro, bondFor, feeFor, microToPi } from '@/lib/escrow';
+import { PARAMS, piToMicro, bondFor, feeFor, sellerLockTotal, microToPi } from '@/lib/escrow';
 import { limitLabel } from '@/lib/tiers';
 import { Shield, Truck, Clock, Info, TrendingUp } from '@/components/icons';
 
@@ -60,6 +60,13 @@ export default function CreatePage() {
   // What the seller nets on completion: full price if the buyer pays the fee,
   // price − fee if the seller absorbs it.
   const netProceeds = feePayer === 'buyer' ? amountMicro : (amountMicro > fee ? amountMicro - fee : 0n);
+  // What the seller actually pays NOW to create: their bond, plus the commission
+  // when they're the fee-payer (held in escrow, released to the operator on
+  // completion — never carved out of the price).
+  const sellerUpfront = useMemo(
+    () => (amountMicro > 0n ? sellerLockTotal(amountMicro, feePayer) : 0n),
+    [amountMicro, feePayer]
+  );
 
   async function submit() {
     if (!valid) return;
@@ -79,8 +86,8 @@ export default function CreatePage() {
         await new Promise<void>((resolve, reject) => {
           createPayment(
             {
-              amount: microToPi(sellerBond),
-              memo: `Clasp bond · ${memo.trim()}`.slice(0, 64),
+              amount: microToPi(sellerUpfront),
+              memo: `Clasp deposit · ${memo.trim()}`.slice(0, 64),
               metadata: { tradeId: trade.id, kind: 'seller_bond' },
             },
             {
@@ -216,22 +223,25 @@ export default function CreatePage() {
         {amount && amountMicro > 0n && (
           <div className="card p-4 animate-fade-up">
             <h3 className="text-[13px] font-bold uppercase tracking-wider text-faint mb-1">
-              Your breakdown if this sale completes
+              Your numbers
             </h3>
-            <MoneyRow label="Item price" micro={amountMicro} />
+            <MoneyRow label="Item price" micro={amountMicro} sub="What the buyer pays you" />
+            <div className="hr" />
+            <MoneyRow label={`Security bond (${Number(PARAMS.BOND_PCT)}%)`} micro={sellerBond} sub="Both parties post one — refunded in full on completion" />
             <div className="hr" />
             <MoneyRow
-              label="Platform fee (1.5%)"
+              label="Platform commission (1.5%)"
               micro={fee}
-              sign={feePayer === 'seller' ? '-' : undefined}
-              sub={feePayer === 'buyer'
-                ? `Min ${microToPi(PARAMS.FEE_MIN)} π · the buyer pays this on top`
-                : `Min ${microToPi(PARAMS.FEE_MIN)} π · taken from your proceeds`}
+              sub={feePayer === 'seller'
+                ? 'You pay it — held in escrow, released to Clasp on completion'
+                : 'The buyer pays this on top of the price'}
             />
             <div className="hr" />
-            <MoneyRow label="You receive" micro={netProceeds} emphasis sub="Plus your bond back on completion" />
+            <MoneyRow label="You pay now to create" micro={sellerUpfront} emphasis
+              sub={feePayer === 'seller' ? 'Your bond + commission' : 'Your bond only'} />
             <div className="hr" />
-            <MoneyRow label="Your seller bond" micro={sellerBond} sub="Refunded on completion — you pay this now to create" />
+            <MoneyRow label="You receive on completion" micro={amountMicro + sellerBond}
+              sub="Full price + your bond back" />
           </div>
         )}
 
@@ -241,7 +251,7 @@ export default function CreatePage() {
       <div className="sticky bottom-0 px-5 pt-4 pb-[max(env(safe-area-inset-bottom),18px)] bg-paper/92 backdrop-blur-md">
         <div className="hr mb-4" />
         <button onClick={submit} disabled={!valid || busy} className="btn-primary w-full">
-          {busy ? (status ?? 'Creating…') : `Create trade & lock ${microToPi(sellerBond)} π bond`}
+          {busy ? (status ?? 'Creating…') : `Create trade & pay ${microToPi(sellerUpfront)} π`}
         </button>
         <p className="mt-2.5 flex items-center justify-center gap-1.5 text-[12px] text-faint">
           <Info width={13} height={13} /> A 1.5% fee applies only when a sale completes.

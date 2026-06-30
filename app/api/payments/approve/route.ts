@@ -65,10 +65,11 @@ export const POST = handler(async (req: NextRequest) => {
   if (isBond && session.uid !== trade.seller_uid) {
     return fail('Only the seller can post the seller bond.', 403);
   }
-  // Seller bond = just the bond; buyer funding = price + bond (+ fee if buyer pays).
+  // Seller up-front = bond (+ commission if the seller pays it); buyer funding =
+  // price + bond (+ commission if the buyer pays it).
   const amountMicro = BigInt(trade.amount_micro);
   const expected = microToPi(
-    isBond ? sellerLockTotal(amountMicro) : buyerLockTotal(amountMicro, trade.fee_payer)
+    isBond ? sellerLockTotal(amountMicro, trade.fee_payer) : buyerLockTotal(amountMicro, trade.fee_payer)
   );
   console.log(`[clasp] approve expected=${expected} payment.amount=${payment.amount} status=${JSON.stringify(payment.status)}`);
   if (Math.abs(payment.amount - expected) > 1e-6) {

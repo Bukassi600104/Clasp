@@ -7,7 +7,7 @@ import { useAuth } from '@/app/providers';
 import { api } from '@/lib/client-api';
 import type { Trade, TradeEvent, PublicStats, Rating } from '@/lib/types';
 import {
-  isTerminal, bondFor, buyerLockTotal, completedPayout, refundedPayout, nuclearPayout, microToPi,
+  isTerminal, bondFor, buyerLockTotal, sellerLockTotal, completedPayout, refundedPayout, nuclearPayout, microToPi,
 } from '@/lib/escrow';
 import { createPayment, isPiBrowser } from '@/lib/pi-client';
 import { formatPi, formatDate } from '@/lib/format';
@@ -80,7 +80,7 @@ export default function TradeDetailPage() {
         await new Promise<void>((resolve, reject) => {
           createPayment(
             {
-              amount: microToPi(bondFor(BigInt(trade.amount_micro))),
+              amount: microToPi(sellerLockTotal(BigInt(trade.amount_micro), trade.fee_payer)),
               memo: `Clasp bond · ${trade.memo}`.slice(0, 64),
               metadata: { tradeId: trade.id, kind: 'seller_bond' },
             },
@@ -250,11 +250,11 @@ function ActionRegion({
         return (
           <div className="space-y-2">
             <button onClick={onPostBond} disabled={busy} className="btn-primary w-full">
-              <Shield width={18} height={18} /> {busy ? (bondStatus ?? 'Working…') : `Post your ${formatPi(trade.seller_bond_micro)} security bond`}
+              <Shield width={18} height={18} /> {busy ? (bondStatus ?? 'Working…') : `Pay your ${formatPi(sellerLockTotal(BigInt(trade.amount_micro), trade.fee_payer).toString())} deposit`}
             </button>
             <p className="text-[12px] text-faint text-center leading-relaxed">
-              This activates the trade. The buyer can’t pay until you post it — and it’s
-              returned in full when the trade completes.
+              This activates the trade — the buyer can’t pay until you post it. Your
+              security bond returns in full when the trade completes.
             </p>
             <button onClick={onCancel} disabled={busy} className="btn-ghost w-full">Cancel trade</button>
           </div>
@@ -349,13 +349,12 @@ function OutcomeCard({ trade, amount }: { trade: Trade; amount: bigint }) {
     const p = completedPayout(amount, trade.fee_payer);
     return (
       <Breakdown title="Final payout">
-        <MoneyRow label="Seller received" micro={p.sellerReceives}
-          sub={trade.fee_payer === 'buyer' ? 'Full price + bond back' : 'Price − 1.5% fee + bond back'} />
+        <MoneyRow label="Seller received" micro={p.sellerReceives} sub="Full price + bond back" />
         <div className="hr" />
         <MoneyRow label="Buyer bond returned" micro={p.buyerReceives} />
         <div className="hr" />
-        <MoneyRow label="Platform fee" micro={p.operatorFee}
-          sub={`1.5%, paid by the ${trade.fee_payer === 'buyer' ? 'buyer' : 'seller'}`} />
+        <MoneyRow label="Platform commission" micro={p.operatorFee}
+          sub={`1.5% (paid up front by the ${trade.fee_payer === 'buyer' ? 'buyer' : 'seller'}) → Clasp`} />
       </Breakdown>
     );
   }
