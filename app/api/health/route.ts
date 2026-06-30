@@ -14,6 +14,7 @@ export function GET() {
       pi_platform: !!process.env.PI_API_KEY,
       persistence: backendName(),
       sandbox: process.env.NEXT_PUBLIC_PI_SANDBOX === 'true',
+      payouts: !!process.env.PI_API_KEY && !!process.env.PI_WALLET_PRIVATE_SEED,
     },
   });
 }
