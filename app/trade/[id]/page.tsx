@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/app/providers';
@@ -36,6 +36,8 @@ export default function TradeDetailPage() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [shipOpen, setShipOpen] = useState(false);
+  const [rateOpen, setRateOpen] = useState(false);
+  const ratePromptedFor = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -52,6 +54,20 @@ export default function TradeDetailPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Pop the rating modal the moment a party's own view shows the trade as
+  // complete and they haven't rated yet — once per trade per page visit (a
+  // dismiss doesn't re-trigger it on the next render, but revisiting the trade
+  // before rating will prompt again).
+  useEffect(() => {
+    if (!trade || !user) return;
+    const isParty = user.uid === trade.seller_uid || user.uid === trade.buyer_uid;
+    if (!isParty || !trade.buyer_uid || !isTerminal(trade.state)) return;
+    if (ratings.some((r) => r.rater_uid === user.uid)) return;
+    if (ratePromptedFor.current === trade.id) return;
+    ratePromptedFor.current = trade.id;
+    setRateOpen(true);
+  }, [trade, user, ratings]);
+
   if (err) return <Centered>{err}</Centered>;
   if (!trade) return <Centered>Loading…</Centered>;
 
@@ -60,6 +76,7 @@ export default function TradeDetailPage() {
   const amount = BigInt(trade.amount_micro);
   const justCreated = search.get('created') === '1';
   const justFunded = search.get('funded') === '1';
+  const counterName = isSeller ? trade.buyer_username : trade.seller_username;
 
   async function act(fn: () => Promise<Trade>) {
     setBusy(true); setErr(null);
@@ -133,13 +150,13 @@ export default function TradeDetailPage() {
         {/* Counterparty track record */}
         <Counterparty trade={trade} isSeller={isSeller} sellerStats={sellerStats} buyerStats={buyerStats} />
 
-        {/* Mutual rating — once the trade has settled */}
+        {/* Mutual rating summary — the prompt itself is the popup modal below */}
         {(isSeller || isBuyer) && (
           <RatingSection
             trade={trade}
             userUid={user?.uid ?? null}
             ratings={ratings}
-            onRated={load}
+            onOpenRate={() => setRateOpen(true)}
           />
         )}
 
@@ -176,6 +193,15 @@ export default function TradeDetailPage() {
           trade={trade}
           onClose={() => setShipOpen(false)}
           onDone={async () => { setShipOpen(false); await load(); }}
+        />
+      )}
+
+      {rateOpen && (isSeller || isBuyer) && trade.buyer_uid && (
+        <RatingModal
+          tradeId={trade.id}
+          counterName={counterName}
+          onClose={() => setRateOpen(false)}
+          onRated={async () => { setRateOpen(false); await load(); }}
         />
       )}
     </div>
@@ -517,11 +543,11 @@ function Banner({ tone, title, body }: { tone: 'brand'; title: string; body: str
   );
 }
 
-/* ── Mutual rating ── */
+/* ── Mutual rating summary (the prompt itself lives in the RatingModal popup) ── */
 function RatingSection({
-  trade, userUid, ratings, onRated,
+  trade, userUid, ratings, onOpenRate,
 }: {
-  trade: Trade; userUid: string | null; ratings: Rating[]; onRated: () => Promise<void> | void;
+  trade: Trade; userUid: string | null; ratings: Rating[]; onOpenRate: () => void;
 }) {
   // Only after a funded trade reaches a terminal outcome (has a counterparty).
   if (!isTerminal(trade.state) || !trade.buyer_uid) return null;
@@ -537,13 +563,15 @@ function RatingSection({
     <div className="card p-5 space-y-4">
       <div className="flex items-center gap-2">
         <ThumbsUp width={18} height={18} className="text-brand" />
-        <h3 className="font-display text-lg font-semibold">Rate this trade</h3>
+        <h3 className="font-display text-lg font-semibold">Feedback</h3>
       </div>
 
       {myRating ? (
         <RatedRow label={`You rated @${counterName ?? 'them'}`} rating={myRating} />
       ) : (
-        <RateForm tradeId={trade.id} counterName={counterName ?? 'your counterparty'} onRated={onRated} />
+        <button onClick={onOpenRate} className="btn-ghost w-full">
+          <ThumbsUp width={16} height={16} /> Rate this trade
+        </button>
       )}
 
       {aboutMe && (
@@ -553,6 +581,22 @@ function RatingSection({
         </>
       )}
     </div>
+  );
+}
+
+/* ── Rating popup — fires automatically once a party's trade reaches a funded
+ * terminal outcome and they haven't rated yet (PRD §5: optional, per-trade,
+ * shown only on completion). Reuses the app's standard bottom-sheet modal. */
+function RatingModal({
+  tradeId, counterName, onClose, onRated,
+}: {
+  tradeId: string; counterName: string | null; onClose: () => void; onRated: () => Promise<void> | void;
+}) {
+  return (
+    <Sheet onClose={onClose} title="Trade complete">
+      <RateForm tradeId={tradeId} counterName={counterName ?? 'your counterparty'} onRated={onRated} />
+      <button onClick={onClose} className="btn-ghost w-full mt-2">Skip for now</button>
+    </Sheet>
   );
 }
 
