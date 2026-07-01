@@ -2,6 +2,7 @@ import 'server-only';
 import { NextResponse } from 'next/server';
 import { SessionError } from './session';
 import { isTransitionError } from './store';
+import { assertServerEnv } from './env-guard';
 import { rateLimit, clientIp } from './rate-limit';
 
 export function ok<T>(data: T, init?: ResponseInit) {
@@ -40,6 +41,7 @@ export function handler<T extends unknown[]>(
 ) {
   return async (...args: T): Promise<Response> => {
     try {
+      assertServerEnv(); // fail fast + loud on a misconfigured deploy (AUDIT F8)
       return await fn(...args);
     } catch (e) {
       if (e instanceof SessionError) return fail('Sign in with Pi to continue.', 401);

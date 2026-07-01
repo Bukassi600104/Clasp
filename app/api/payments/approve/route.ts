@@ -4,6 +4,7 @@ import { requireSession } from '@/lib/session';
 import { getTrade } from '@/lib/store';
 import { getPayment, approvePayment } from '@/lib/pi-server';
 import { buyerLockTotal, sellerLockTotal, microToPi } from '@/lib/escrow';
+import { logPayment, newRequestId } from '@/lib/payment-audit';
 import { handler, ok, fail } from '@/lib/api';
 
 export const dynamic = 'force-dynamic';
@@ -34,7 +35,8 @@ export const POST = handler(async (req: NextRequest) => {
     return fail('Payments are not available right now. Please try again shortly.', 503);
   }
 
-  console.log(`[clasp] approve START payment=${parsed.data.paymentId} trade=${parsed.data.tradeId}`);
+  const requestId = newRequestId();
+  console.log(`[clasp] approve START rid=${requestId} payment=${parsed.data.paymentId} trade=${parsed.data.tradeId}`);
   // The two reads are independent — run them together so we spend the Pi
   // approval window on one round-trip's worth of latency, not two. (The wallet
   // gives a short window; a cold function doing sequential I/O can blow it.)
@@ -50,6 +52,7 @@ export const POST = handler(async (req: NextRequest) => {
     // PI_API_KEY belongs to a DIFFERENT Pi app/network than the one that created
     // the payment in the user's Pi Browser. Retrying never helps — say so loudly.
     const msg = e instanceof Error ? e.message : String(e);
+    logPayment({ requestId, phase: 'approve', paymentId: parsed.data.paymentId, tradeId: parsed.data.tradeId, status: msg.includes('(404)') ? 'pi_404_app_mismatch' : 'error', detail: msg });
     if (msg.includes('(404)')) {
       console.error(
         `[clasp] approve PAYMENT-NOT-FOUND payment=${parsed.data.paymentId}: Pi API returned 404. ` +
@@ -60,7 +63,10 @@ export const POST = handler(async (req: NextRequest) => {
     }
     throw e;
   }
-  if (!trade) return fail('Trade not found.', 404);
+  if (!trade) {
+    logPayment({ requestId, phase: 'approve', paymentId: parsed.data.paymentId, tradeId: parsed.data.tradeId, status: 'trade_not_found' });
+    return fail('Trade not found.', 404);
+  }
   const isBond = parsed.data.kind === 'seller_bond';
   if (isBond && session.uid !== trade.seller_uid) {
     return fail('Only the seller can post the seller bond.', 403);
@@ -74,9 +80,17 @@ export const POST = handler(async (req: NextRequest) => {
   console.log(`[clasp] approve expected=${expected} payment.amount=${payment.amount} status=${JSON.stringify(payment.status)}`);
   if (Math.abs(payment.amount - expected) > 1e-6) {
     console.error(`[clasp] approve AMOUNT MISMATCH pi=${payment.amount} expected=${expected}`);
+    logPayment({ requestId, phase: 'approve', paymentId: parsed.data.paymentId, tradeId: trade.id, status: 'amount_mismatch', detail: `pi=${payment.amount} expected=${expected}` });
     return fail('Payment amount does not match the trade lock amount.', 409);
   }
-  await approvePayment(parsed.data.paymentId);
-  console.log(`[clasp] approve OK payment=${parsed.data.paymentId}`);
+  try {
+    await approvePayment(parsed.data.paymentId);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logPayment({ requestId, phase: 'approve', paymentId: parsed.data.paymentId, tradeId: trade.id, status: 'pi_approve_error', detail: msg });
+    throw e;
+  }
+  logPayment({ requestId, phase: 'approve', paymentId: parsed.data.paymentId, tradeId: trade.id, status: 'ok', detail: `expected=${expected}` });
+  console.log(`[clasp] approve OK rid=${requestId} payment=${parsed.data.paymentId}`);
   return ok({ approved: true, expected });
 });

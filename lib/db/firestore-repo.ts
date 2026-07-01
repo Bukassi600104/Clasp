@@ -1,12 +1,15 @@
 import 'server-only';
-import type { Repo } from './repo';
+import { randomUUID } from 'crypto';
+import type { Repo, TransitionResult } from './repo';
 import { normalizeProfile } from './repo';
 import type {
   Trade, TradeEvent, SettlementProposal, Evidence, AppNotification, Profile,
-  Partner, WebhookDelivery, Rating, Payout,
+  Partner, WebhookDelivery, Rating, Payout, StateHistoryEntry, PaymentIntent,
+  PaymentLog,
 } from '../types';
 import { NON_TERMINAL } from '../escrow';
 import { DEFAULT_LIMIT_MICRO } from '../tiers';
+import { TransitionError } from '../errors';
 import { db } from '../firebase';
 
 /**
@@ -55,6 +58,43 @@ export class FirestoreRepo implements Repo {
     return snap.exists ? (snap.data() as Trade) : null;
   }
   async saveTrade(t: Trade) { await this.c.collection('trades').doc(t.id).set(t); }
+
+  /**
+   * Escrow transitions run as a single Firestore transaction: the trade is read,
+   * the guards + mutation run against that snapshot, and the trade document plus
+   * its state_history row commit together or not at all. Firestore retries the
+   * transaction on contention, re-running `mutate` against fresh data — which is
+   * exactly what makes the double-fund and timeout-vs-action races safe.
+   */
+  async runTradeTransition(id: string, mutate: (t: Trade) => TransitionResult): Promise<Trade> {
+    const ref = this.c.collection('trades').doc(id);
+    return this.c.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new TransitionError('Trade not found.');
+      const res = mutate(snap.data() as Trade);
+      if (res.unchanged) return res.trade;
+      tx.set(ref, res.trade);
+      if (res.history) {
+        const entry: StateHistoryEntry = {
+          id: randomUUID(),
+          trade_id: id,
+          event: res.history.event,
+          from_state: res.history.from,
+          to_state: res.history.to,
+          actor: res.history.actor,
+          payload: res.history.payload ?? {},
+          at: new Date().toISOString(),
+        };
+        tx.set(ref.collection('state_history').doc(entry.id), entry);
+      }
+      return res.trade;
+    });
+  }
+  async listStateHistory(tradeId: string) {
+    const q = await this.c.collection('trades').doc(tradeId).collection('state_history').get();
+    return q.docs.map((d) => d.data() as StateHistoryEntry)
+      .sort((a, b) => a.at.localeCompare(b.at));
+  }
   async getTradeByRef(partnerId: string | null, ref: string) {
     const q = await this.c.collection('trades').where('ref', '==', ref).get();
     const hit = q.docs.map((d) => d.data() as Trade).find((t) => t.partner_id === partnerId);
@@ -135,6 +175,26 @@ export class FirestoreRepo implements Repo {
     const batch = this.c.batch();
     q.docs.forEach((d) => batch.update(d.ref, { read_at: now }));
     if (q.size) await batch.commit();
+  }
+
+  // ── payment intents ──
+  async upsertPaymentIntent(i: PaymentIntent) {
+    await this.c.collection('payment_intents').doc(i.payment_id).set(i);
+  }
+  async getPaymentIntent(paymentId: string) {
+    const snap = await this.c.collection('payment_intents').doc(paymentId).get();
+    return snap.exists ? (snap.data() as PaymentIntent) : null;
+  }
+  async listCompletingIntents(olderThanIso: string) {
+    const q = await this.c.collection('payment_intents').where('status', '==', 'completing').get();
+    return q.docs.map((d) => d.data() as PaymentIntent)
+      .filter((i) => i.created_at <= olderThanIso)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  }
+
+  // ── payment logs ──
+  async addPaymentLog(l: PaymentLog) {
+    await this.c.collection('payment_logs').doc(l.id).set(l);
   }
 
   // ── payouts ──

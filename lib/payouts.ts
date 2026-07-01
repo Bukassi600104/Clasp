@@ -70,6 +70,17 @@ export async function enqueuePayoutsForTrade(trade: Trade): Promise<void> {
 }
 
 /**
+ * Best-effort immediate drain, fired right after payouts are enqueued so a
+ * completed trade settles in seconds instead of waiting for the daily cron.
+ * Safe to be killed mid-flight: every step below persists before the next, so
+ * the cron simply resumes whatever this attempt did not finish.
+ */
+export function kickPayouts(): void {
+  if (!payoutsEnabled()) return;
+  void processPendingPayouts(4).catch((e) => console.error('[clasp] opportunistic payout drain failed:', e));
+}
+
+/**
  * Resumable create→submit→complete for a single payout, persisting after EACH
  * step. This is what prevents double-paying: if we crash after creating or
  * submitting, the saved payment_id/txid lets the next run resume that exact

@@ -122,6 +122,51 @@ export interface RatingSummary {
   count: number;
 }
 
+/** One row per escrow state transition, written in the SAME atomic commit as the
+ *  trade document itself (Firestore transaction), so the history can never
+ *  disagree with the state. This is the auditable `state_history` trail. */
+export interface StateHistoryEntry {
+  id: string;
+  trade_id: string;
+  event: string;
+  from_state: TradeState;
+  to_state: TradeState;
+  /** Who caused it: a pi uid, or 'timeout' for permissionless deadline advances. */
+  actor: string | null;
+  payload: Record<string, unknown>;
+  at: string;
+}
+
+/** Durable record of a U2A payment completion, written BEFORE we acknowledge the
+ *  payment with Pi. If the local trade write then fails (the "money moved but no
+ *  record" failure), the intent stays `completing` and the reconciler replays the
+ *  idempotent bond/fund transition instead of losing the payment. */
+export interface PaymentIntent {
+  payment_id: string; // doc id
+  trade_id: string;
+  kind: 'escrow_lock' | 'seller_bond';
+  uid: string;
+  username: string;
+  txid: string;
+  status: 'completing' | 'recorded' | 'failed';
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Append-only log of every Pi verification attempt (approve/complete), so
+ *  payment failures are diagnosable from the database, not just console logs. */
+export interface PaymentLog {
+  id: string;
+  request_id: string;
+  phase: 'approve' | 'complete' | 'reconcile';
+  payment_id: string;
+  trade_id: string | null;
+  status: string; // e.g. 'ok', 'http_404', 'amount_mismatch', 'error:<msg>'
+  detail: string | null;
+  at: string;
+}
+
 /** A custodial App-to-User payout owed to a party once a trade settles. One per
  *  (trade, role); id = `${trade_id}:${role}` makes enqueue/settlement idempotent.
  *  The resumable create→submit→complete cycle persists payment_id then txid so a

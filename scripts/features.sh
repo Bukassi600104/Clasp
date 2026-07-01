@@ -62,6 +62,7 @@ echo ""
 echo "=== EVIDENCE UPLOAD (dispute) ==="
 login seller_ev; login buyer_ev
 EID=$(curl -s -b $P/seller_ev -X POST $B/api/trades -H "$H" -d '{"amount":18,"shipWindowS":259200,"inspectWindowS":259200,"memo":"Disputed item"}' | jq_ "['data']['id']")
+curl -s -b $P/seller_ev -X POST $B/api/trades/$EID/bond -H "$H" >/dev/null
 curl -s -b $P/buyer_ev -X POST $B/api/trades/$EID/fund -H "$H" -d '{"txid":"e1"}' >/dev/null
 curl -s -b $P/seller_ev -X POST $B/api/trades/$EID/ship -H "$H" -d '{"evidenceNote":"shipped it"}' >/dev/null
 curl -s -b $P/buyer_ev -X POST $B/api/trades/$EID/dispute -H "$H" >/dev/null

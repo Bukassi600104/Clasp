@@ -43,8 +43,10 @@ export default function DisputePage() {
   const nuclear = trade.state === 'NUCLEAR';
   const active = trade.state === 'DISPUTED';
 
-  const preview = settledPayout(amount, BigInt(sellerPct));
-  const nuke = nuclearPayout(amount);
+  // Pass the trade's fee payer so previews match the payout engine exactly —
+  // omitting it defaults to seller-pays and shows wrong numbers on buyer-pays trades.
+  const preview = settledPayout(amount, BigInt(sellerPct), trade.fee_payer);
+  const nuke = nuclearPayout(amount, trade.fee_payer);
 
   async function propose() {
     setBusy(true); setErr(null);

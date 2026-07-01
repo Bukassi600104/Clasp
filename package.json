@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "test:unit": "node --test tests/money.test.ts",
     "emulator": "firebase emulators:start --only firestore --project clasp-local",
     "verify": "bash scripts/lifecycle.sh && bash scripts/features.sh"
   },

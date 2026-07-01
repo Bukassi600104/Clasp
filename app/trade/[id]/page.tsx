@@ -484,7 +484,7 @@ function EventLog({ events }: { events: TradeEvent[] }) {
             </div>
             {e.chain_tx && (
               <a
-                href={`https://blockexplorer.minepi.com/mainnet/transactions/${e.chain_tx}`}
+                href={`${process.env.NEXT_PUBLIC_PI_EXPLORER_BASE ?? 'https://blockexplorer.minepi.com/testnet'}/transactions/${e.chain_tx}`}
                 target="_blank" rel="noreferrer"
                 className="text-faint hover:text-brand mt-0.5"
                 aria-label="View on explorer"

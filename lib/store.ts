@@ -11,8 +11,10 @@ import type {
   Rating, RatingSummary,
 } from './types';
 import { repo } from './db/repo';
+import type { TransitionResult } from './db/repo';
+import { TransitionError } from './errors';
 import { dispatchWebhook } from './webhooks';
-import { enqueuePayoutsForTrade } from './payouts';
+import { enqueuePayoutsForTrade, kickPayouts } from './payouts';
 
 /**
  * Escrow orchestration layer. Loads/persists via the repository (Firestore or
@@ -30,10 +32,9 @@ const iso = (d: Date) => d.toISOString();
 const plus = (seconds: number, from = now()) => iso(new Date(from.getTime() + seconds * 1000));
 const passed = (deadline: string | null) => !!deadline && new Date(deadline).getTime() <= Date.now();
 
-class TransitionError extends Error {}
-export function isTransitionError(e: unknown): e is TransitionError {
-  return e instanceof TransitionError;
-}
+// Domain error lives in lib/errors.ts so the repo layer can throw it without a
+// circular import; re-exported here so existing importers keep working.
+export { TransitionError, isTransitionError } from './errors';
 
 async function emit(
   trade: Trade, event: string,
@@ -294,18 +295,31 @@ export async function createTrade(args: CreateArgs): Promise<Trade> {
  * approve route before this runs.
  */
 export async function bondTrade(id: string, sellerUid: string, txid?: string): Promise<Trade> {
-  const t = await getOrThrow(id);
-  if (sellerUid !== t.seller_uid) throw new TransitionError('Only the seller can post the seller bond.');
-  if (t.seller_bond_paid) return t; // already posted — idempotent replay
-  if (t.state !== 'CREATED') throw new TransitionError('This trade is past the bond stage.');
-  t.seller_bond_paid = true;
-  t.seller_bond_txid = txid ?? null;
-  await save(t);
-  await emit(t, 'trade.bonded', 'CREATED', 'CREATED', { txid, by: 'seller' });
+  await advanceTimeoutsById(id);
+  let replay = false;
+  const t = await repo().runTradeTransition(id, (fresh) => {
+    if (sellerUid !== fresh.seller_uid) throw new TransitionError('Only the seller can post the seller bond.');
+    if (fresh.seller_bond_paid) { replay = true; return { trade: fresh, unchanged: true }; }
+    if (fresh.state !== 'CREATED') throw new TransitionError('This trade is past the bond stage.');
+    fresh.seller_bond_paid = true;
+    fresh.seller_bond_txid = txid ?? null;
+    fresh.updated_at = iso(now());
+    return {
+      trade: fresh,
+      history: { event: 'trade.bonded', from: 'CREATED', to: 'CREATED', actor: sellerUid, payload: { txid: txid ?? null } },
+    };
+  });
+  if (!replay) await emit(t, 'trade.bonded', 'CREATED', 'CREATED', { txid, by: 'seller' });
   return t;
 }
 
 // ── Transitions ──────────────────────────────────────────────────────────────
+//
+// Every state change runs inside repo().runTradeTransition: the guards execute
+// against the trade as read INSIDE the store's transaction, and the new state
+// commits together with its state_history row — or not at all. Notifications,
+// trade_events and webhooks are append-only side effects and run after commit.
+
 async function getOrThrow(id: string): Promise<Trade> {
   const t = await repo().getTrade(id);
   if (!t) throw new TransitionError('Trade not found.');
@@ -313,59 +327,77 @@ async function getOrThrow(id: string): Promise<Trade> {
 }
 
 export async function fundTrade(id: string, buyerUid: string, buyerUsername: string, txid?: string): Promise<Trade> {
-  const t = await getOrThrow(id);
-  // Idempotent replay: Pi (or the client) can re-send completion for the same
-  // payment. If this buyer already funded it, return the recorded trade instead
-  // of throwing — a successful retry must never look like a failure or lose data.
-  if (t.state === 'FUNDED' && t.buyer_uid === buyerUid) return t;
-  if (t.state !== 'CREATED') throw new TransitionError('This trade can no longer be funded.');
-  if (passed(t.funding_deadline)) throw new TransitionError('The funding window has expired.');
-  if (buyerUid === t.seller_uid) throw new TransitionError('You cannot fund your own trade.');
-  if (t.seller_bond_paid === false) throw new TransitionError('The seller has not posted their security bond yet.');
+  await advanceTimeoutsById(id);
   await ensureProfile(buyerUid, buyerUsername);
-  t.buyer_uid = buyerUid;
-  t.buyer_username = buyerUsername;
-  t.state = 'FUNDED';
-  t.ship_deadline = plus(t.ship_window_s);
-  await save(t);
-  await emit(t, 'trade.funded', 'CREATED', 'FUNDED', { txid, buyer: buyerUsername });
-  await notify(t.seller_uid, t, 'funded', 'Funds locked', `${buyerUsername} locked payment. Ship within your window and mark it shipped.`);
-  await notify(t.buyer_uid, t, 'funded', 'Payment locked safely', 'Your Pi is held by the contract. The seller cannot touch it until you confirm delivery.');
+  let replay = false;
+  const t = await repo().runTradeTransition(id, (fresh) => {
+    // Idempotent replay: Pi (or the client) can re-send completion for the same
+    // payment. If this buyer already funded it, return the recorded trade instead
+    // of throwing — a successful retry must never look like a failure or lose data.
+    if (fresh.state === 'FUNDED' && fresh.buyer_uid === buyerUid) { replay = true; return { trade: fresh, unchanged: true }; }
+    if (fresh.state !== 'CREATED') throw new TransitionError('This trade can no longer be funded.');
+    if (passed(fresh.funding_deadline)) throw new TransitionError('The funding window has expired.');
+    if (buyerUid === fresh.seller_uid) throw new TransitionError('You cannot fund your own trade.');
+    if (fresh.seller_bond_paid === false) throw new TransitionError('The seller has not posted their security bond yet.');
+    fresh.buyer_uid = buyerUid;
+    fresh.buyer_username = buyerUsername;
+    fresh.state = 'FUNDED';
+    fresh.ship_deadline = plus(fresh.ship_window_s);
+    fresh.updated_at = iso(now());
+    return {
+      trade: fresh,
+      history: { event: 'trade.funded', from: 'CREATED', to: 'FUNDED', actor: buyerUid, payload: { txid: txid ?? null } },
+    };
+  });
+  if (!replay) {
+    await emit(t, 'trade.funded', 'CREATED', 'FUNDED', { txid, buyer: buyerUsername });
+    await notify(t.seller_uid, t, 'funded', 'Funds locked', `${buyerUsername} locked payment. Ship within your window and mark it shipped.`);
+    await notify(t.buyer_uid, t, 'funded', 'Payment locked safely', 'Your Pi is held by the contract. The seller cannot touch it until you confirm delivery.');
+  }
   return t;
 }
 
 export async function markShipped(id: string, sellerUid: string, evidenceHash: string): Promise<Trade> {
-  const t = await getOrThrow(id);
-  if (t.state !== 'FUNDED') throw new TransitionError('Only a funded trade can be marked shipped.');
-  if (sellerUid !== t.seller_uid) throw new TransitionError('Only the seller can mark a trade shipped.');
-  if (passed(t.ship_deadline)) throw new TransitionError('The ship window has expired.');
-  if (!evidenceHash) throw new TransitionError('Shipping evidence is required.');
-  t.state = 'SHIPPED';
-  t.evidence_hash = evidenceHash;
-  t.inspect_deadline = plus(t.inspect_window_s);
-  await save(t);
+  await advanceTimeoutsById(id);
+  const t = await repo().runTradeTransition(id, (fresh) => {
+    if (fresh.state !== 'FUNDED') throw new TransitionError('Only a funded trade can be marked shipped.');
+    if (sellerUid !== fresh.seller_uid) throw new TransitionError('Only the seller can mark a trade shipped.');
+    if (passed(fresh.ship_deadline)) throw new TransitionError('The ship window has expired.');
+    if (!evidenceHash) throw new TransitionError('Shipping evidence is required.');
+    fresh.state = 'SHIPPED';
+    fresh.evidence_hash = evidenceHash;
+    fresh.inspect_deadline = plus(fresh.inspect_window_s);
+    fresh.updated_at = iso(now());
+    return {
+      trade: fresh,
+      history: { event: 'trade.shipped', from: 'FUNDED', to: 'SHIPPED', actor: sellerUid, payload: { evidence_hash: evidenceHash } },
+    };
+  });
   await emit(t, 'trade.shipped', 'FUNDED', 'SHIPPED', { evidence_hash: evidenceHash });
   await notify(t.buyer_uid, t, 'shipped', 'Seller marked shipped', 'Check your delivery, then confirm receipt to release payment — or open a dispute before the window ends.');
   return t;
 }
 
 export async function confirmReceipt(id: string, buyerUid: string): Promise<Trade> {
-  const t = await getOrThrow(id);
-  if (t.state !== 'SHIPPED') throw new TransitionError('Only a shipped trade can be confirmed.');
-  if (buyerUid !== t.buyer_uid) throw new TransitionError('Only the buyer can confirm receipt.');
-  await complete(t, 'manual');
-  return t;
+  await advanceTimeoutsById(id);
+  return completeTrade(id, buyerUid, 'manual');
 }
 
 export async function openDispute(id: string, buyerUid: string): Promise<Trade> {
-  const t = await getOrThrow(id);
-  if (t.state !== 'SHIPPED') throw new TransitionError('Only a shipped trade can be disputed.');
-  if (buyerUid !== t.buyer_uid) throw new TransitionError('Only the buyer can open a dispute.');
-  if (passed(t.inspect_deadline)) throw new TransitionError('The inspection window has closed.');
-  t.state = 'DISPUTED';
-  t.disputed = true; // permanently excludes this trade from the seller's clean count
-  t.settlement_deadline = plus(PARAMS.SETTLEMENT_WINDOW_S);
-  await save(t);
+  await advanceTimeoutsById(id);
+  const t = await repo().runTradeTransition(id, (fresh) => {
+    if (fresh.state !== 'SHIPPED') throw new TransitionError('Only a shipped trade can be disputed.');
+    if (buyerUid !== fresh.buyer_uid) throw new TransitionError('Only the buyer can open a dispute.');
+    if (passed(fresh.inspect_deadline)) throw new TransitionError('The inspection window has closed.');
+    fresh.state = 'DISPUTED';
+    fresh.disputed = true; // permanently excludes this trade from the seller's clean count
+    fresh.settlement_deadline = plus(PARAMS.SETTLEMENT_WINDOW_S);
+    fresh.updated_at = iso(now());
+    return {
+      trade: fresh,
+      history: { event: 'trade.disputed', from: 'SHIPPED', to: 'DISPUTED', actor: buyerUid },
+    };
+  });
   const sp = await repo().getProfile(t.seller_uid);
   if (sp) { sp.disputes_total += 1; await repo().saveProfile(sp); }
   await emit(t, 'trade.disputed', 'SHIPPED', 'DISPUTED', {});
@@ -397,17 +429,27 @@ export async function proposeSettlement(id: string, proposerUid: string, sellerP
 }
 
 export async function acceptSettlement(id: string, accepterUid: string, proposalId: string): Promise<Trade> {
-  const t = await getOrThrow(id);
-  if (t.state !== 'DISPUTED') throw new TransitionError('Nothing to accept — the trade is not in dispute.');
+  await advanceTimeoutsById(id);
+  // The proposal is read before the transaction (mutators must be synchronous);
+  // the trade-state guard re-runs inside it, so a racing accept or timeout makes
+  // the second writer fail cleanly rather than double-settle.
   const proposals = await repo().listProposals(id);
   const proposal = proposals.find((p) => p.id === proposalId);
   if (!proposal || proposal.status !== 'open') throw new TransitionError('That proposal is no longer open.');
   if (accepterUid === proposal.proposer_uid) throw new TransitionError('The counterparty must accept, not the proposer.');
-  if (accepterUid !== t.seller_uid && accepterUid !== t.buyer_uid) throw new TransitionError('Only a party to the trade can accept.');
+  const t = await repo().runTradeTransition(id, (fresh) => {
+    if (fresh.state !== 'DISPUTED') throw new TransitionError('Nothing to accept — the trade is not in dispute.');
+    if (accepterUid !== fresh.seller_uid && accepterUid !== fresh.buyer_uid) throw new TransitionError('Only a party to the trade can accept.');
+    fresh.state = 'SETTLED';
+    fresh.updated_at = iso(now());
+    return {
+      trade: fresh,
+      history: { event: 'trade.settled', from: 'DISPUTED', to: 'SETTLED', actor: accepterUid, payload: { seller_pct: proposal.seller_pct, proposal_id: proposal.id } },
+    };
+  });
   await repo().saveProposal({ ...proposal, status: 'accepted' });
-  t.state = 'SETTLED';
-  await save(t);
   await enqueuePayoutsForTrade(t); // split per the accepted proposal + bonds back
+  kickPayouts();
   await emit(t, 'trade.settled', 'DISPUTED', 'SETTLED', { seller_pct: proposal.seller_pct });
   await notify(t.seller_uid, t, 'settled', 'Dispute settled', `Agreed split: ${proposal.seller_pct}% to seller. Funds released by the contract.`);
   await notify(t.buyer_uid, t, 'settled', 'Dispute settled', `Agreed split: ${100 - proposal.seller_pct}% refunded to you. Bonds returned.`);
@@ -415,13 +457,20 @@ export async function acceptSettlement(id: string, accepterUid: string, proposal
 }
 
 export async function cancelUnfunded(id: string, byUid: string): Promise<Trade> {
-  const t = await getOrThrow(id);
-  if (t.state !== 'CREATED') throw new TransitionError('Only an unfunded trade can be cancelled.');
-  const sellerCancel = byUid === t.seller_uid;
-  if (!sellerCancel && !passed(t.funding_deadline))
-    throw new TransitionError('Only the seller can cancel before the funding window expires.');
-  t.state = 'CANCELLED';
-  await save(t);
+  await advanceTimeoutsById(id);
+  let sellerCancel = false;
+  const t = await repo().runTradeTransition(id, (fresh) => {
+    if (fresh.state !== 'CREATED') throw new TransitionError('Only an unfunded trade can be cancelled.');
+    sellerCancel = byUid === fresh.seller_uid;
+    if (!sellerCancel && !passed(fresh.funding_deadline))
+      throw new TransitionError('Only the seller can cancel before the funding window expires.');
+    fresh.state = 'CANCELLED';
+    fresh.updated_at = iso(now());
+    return {
+      trade: fresh,
+      history: { event: 'trade.cancelled', from: 'CREATED', to: 'CANCELLED', actor: sellerCancel ? byUid : 'timeout' },
+    };
+  });
   await emit(t, 'trade.cancelled', 'CREATED', 'CANCELLED', { by: sellerCancel ? 'seller' : 'timeout' });
   await notify(t.seller_uid, t, 'cancelled', 'Trade cancelled', 'The trade was cancelled and your seller bond returned.');
   return t;
@@ -443,16 +492,21 @@ export async function claimTimeout(id: string): Promise<Trade> {
  * only admits CANCELLED + no buyer, so funds can't be replayed.
  */
 export async function reactivateTrade(id: string, byUid: string): Promise<Trade> {
-  const t = await getOrThrow(id);
-  if (t.state !== 'CANCELLED')
-    throw new TransitionError('Only a cancelled or expired trade can be reactivated.');
-  if (t.buyer_uid)
-    throw new TransitionError('A trade that was already funded cannot be reactivated.');
-  if (byUid !== t.seller_uid)
-    throw new TransitionError('Only the seller can reactivate their trade.');
-  t.state = 'CREATED';
-  t.funding_deadline = plus(PARAMS.FUNDING_WINDOW_S);
-  await save(t);
+  const t = await repo().runTradeTransition(id, (fresh) => {
+    if (fresh.state !== 'CANCELLED')
+      throw new TransitionError('Only a cancelled or expired trade can be reactivated.');
+    if (fresh.buyer_uid)
+      throw new TransitionError('A trade that was already funded cannot be reactivated.');
+    if (byUid !== fresh.seller_uid)
+      throw new TransitionError('Only the seller can reactivate their trade.');
+    fresh.state = 'CREATED';
+    fresh.funding_deadline = plus(PARAMS.FUNDING_WINDOW_S);
+    fresh.updated_at = iso(now());
+    return {
+      trade: fresh,
+      history: { event: 'trade.reactivated', from: 'CANCELLED', to: 'CREATED', actor: byUid },
+    };
+  });
   await emit(t, 'trade.reactivated', 'CANCELLED', 'CREATED', { by: 'seller' });
   await notify(t.seller_uid, t, 'reactivated', 'Trade reactivated',
     'Your trade is live again with a fresh 24h funding window. Share the link to get paid.');
@@ -475,16 +529,42 @@ export async function addEvidence(id: string, uploaderUid: string, storagePath: 
 }
 
 // ── Internal ─────────────────────────────────────────────────────────────────
-async function complete(t: Trade, reason: 'manual' | 'silence') {
-  t.state = 'COMPLETED';
-  await save(t);
-  await enqueuePayoutsForTrade(t); // owe seller proceeds + buyer bond
+
+/**
+ * SHIPPED → COMPLETED, transactional. `reason:'manual'` is the buyer confirming
+ * (actor must be the buyer); `reason:'silence'` is the permissionless inspection
+ * timeout (actor recorded as 'timeout'). The silence path is a no-op instead of
+ * an error when another writer got there first, since lazy timeouts race reads.
+ */
+async function completeTrade(id: string, actor: string | null, reason: 'manual' | 'silence'): Promise<Trade> {
+  let noop = false;
+  const t = await repo().runTradeTransition(id, (fresh) => {
+    if (reason === 'silence') {
+      if (fresh.state !== 'SHIPPED' || !passed(fresh.inspect_deadline)) {
+        noop = true;
+        return { trade: fresh, unchanged: true };
+      }
+    } else {
+      if (fresh.state !== 'SHIPPED') throw new TransitionError('Only a shipped trade can be confirmed.');
+      if (actor !== fresh.buyer_uid) throw new TransitionError('Only the buyer can confirm receipt.');
+    }
+    fresh.state = 'COMPLETED';
+    fresh.updated_at = iso(now());
+    return {
+      trade: fresh,
+      history: { event: 'trade.completed', from: 'SHIPPED', to: 'COMPLETED', actor: reason === 'manual' ? actor : 'timeout', payload: { reason } },
+    };
+  });
+  if (noop) return t;
+  await enqueuePayoutsForTrade(t); // owe seller price + bond, buyer bond
+  kickPayouts();
   await emit(t, 'trade.completed', 'SHIPPED', 'COMPLETED', { reason });
   await bumpCompletion(t);
   await notify(t.seller_uid, t, 'completed', 'Trade complete — you got paid', reason === 'silence'
-    ? 'The inspection window passed with no dispute. Payment released to you, minus the 1.5% fee.'
-    : 'The buyer confirmed delivery. Payment released to you, minus the 1.5% fee.');
+    ? 'The inspection window passed with no dispute. The full price plus your bond are on the way to you.'
+    : 'The buyer confirmed delivery. The full price plus your bond are on the way to you.');
   await notify(t.buyer_uid, t, 'completed', 'Trade complete', 'Your bond was returned. Thanks for trading safely on Clasp.');
+  return t;
 }
 
 async function bumpCompletion(t: Trade) {
@@ -510,39 +590,82 @@ async function recountCounterparties(uid: string) {
   await repo().saveProfile(p);
 }
 
-/** Apply any due permissionless timeout transition. May persist + emit. */
+/**
+ * Apply any due permissionless timeout transition, transactionally. The snapshot
+ * only decides WHICH timeout might be due; the deadline + state are re-checked
+ * inside the transaction, and a concurrent writer turns the timeout into a
+ * silent no-op instead of clobbering their transition.
+ */
 async function advanceTimeouts(t: Trade): Promise<Trade> {
   if (isTerminal(t.state)) return t;
+  if (t.state === 'CREATED' && passed(t.funding_deadline)) return timeoutCancel(t.id);
+  if (t.state === 'FUNDED' && passed(t.ship_deadline)) return timeoutRefund(t.id);
+  if (t.state === 'SHIPPED' && passed(t.inspect_deadline)) return completeTrade(t.id, null, 'silence');
+  if (t.state === 'DISPUTED' && passed(t.settlement_deadline)) return timeoutNuclear(t.id);
+  return t;
+}
 
-  if (t.state === 'CREATED' && passed(t.funding_deadline)) {
-    t.state = 'CANCELLED';
-    await save(t);
-    await emit(t, 'trade.cancelled', 'CREATED', 'CANCELLED', { by: 'timeout' });
-    await notify(t.seller_uid, t, 'cancelled', 'Trade expired unfunded', 'No buyer funded in time. Your seller bond was returned.');
-    return t;
-  }
-  if (t.state === 'FUNDED' && passed(t.ship_deadline)) {
-    t.state = 'REFUNDED';
-    await save(t);
-    await enqueuePayoutsForTrade(t); // refund buyer price + bond, return seller bond
-    await emit(t, 'trade.refunded', 'FUNDED', 'REFUNDED', { by: 'timeout' });
-    await notify(t.buyer_uid, t, 'refunded', 'Auto-refunded — seller no-show', 'The seller missed the ship window. Your payment and bond were returned in full.');
-    await notify(t.seller_uid, t, 'refunded', 'Trade refunded', 'You missed the ship window, so the buyer was refunded. Your seller bond was returned.');
-    return t;
-  }
-  if (t.state === 'SHIPPED' && passed(t.inspect_deadline)) {
-    await complete(t, 'silence');
-    return t;
-  }
-  if (t.state === 'DISPUTED' && passed(t.settlement_deadline)) {
-    t.state = 'NUCLEAR';
-    await save(t);
-    await enqueuePayoutsForTrade(t); // 50/50 principal split; bonds stay (burned)
-    await emit(t, 'trade.nuclear', 'DISPUTED', 'NUCLEAR', {});
-    await notify(t.seller_uid, t, 'nuclear', 'Nuclear outcome', 'No settlement was reached. Both bonds were burned and the principal split 50/50.');
-    await notify(t.buyer_uid, t, 'nuclear', 'Nuclear outcome', 'No settlement was reached. Both bonds were burned and the principal split 50/50.');
-    return t;
-  }
+/** Run due timeouts for a trade by id before an explicit transition attempts its
+ *  own guards — so "expired" trades fail with the right message, atomically. */
+async function advanceTimeoutsById(id: string): Promise<void> {
+  const t = await repo().getTrade(id);
+  if (t) await advanceTimeouts(t);
+}
+
+async function timeoutCancel(id: string): Promise<Trade> {
+  let noop = false;
+  const t = await repo().runTradeTransition(id, (fresh) => {
+    if (fresh.state !== 'CREATED' || !passed(fresh.funding_deadline)) {
+      noop = true;
+      return { trade: fresh, unchanged: true };
+    }
+    fresh.state = 'CANCELLED';
+    fresh.updated_at = iso(now());
+    return { trade: fresh, history: { event: 'trade.cancelled', from: 'CREATED', to: 'CANCELLED', actor: 'timeout' } };
+  });
+  if (noop) return t;
+  await emit(t, 'trade.cancelled', 'CREATED', 'CANCELLED', { by: 'timeout' });
+  await notify(t.seller_uid, t, 'cancelled', 'Trade expired unfunded', 'No buyer funded in time. Your seller bond was returned.');
+  return t;
+}
+
+async function timeoutRefund(id: string): Promise<Trade> {
+  let noop = false;
+  const t = await repo().runTradeTransition(id, (fresh) => {
+    if (fresh.state !== 'FUNDED' || !passed(fresh.ship_deadline)) {
+      noop = true;
+      return { trade: fresh, unchanged: true };
+    }
+    fresh.state = 'REFUNDED';
+    fresh.updated_at = iso(now());
+    return { trade: fresh, history: { event: 'trade.refunded', from: 'FUNDED', to: 'REFUNDED', actor: 'timeout' } };
+  });
+  if (noop) return t;
+  await enqueuePayoutsForTrade(t); // refund buyer price + bond, return seller bond
+  kickPayouts();
+  await emit(t, 'trade.refunded', 'FUNDED', 'REFUNDED', { by: 'timeout' });
+  await notify(t.buyer_uid, t, 'refunded', 'Auto-refunded — seller no-show', 'The seller missed the ship window. Your payment and bond were returned in full.');
+  await notify(t.seller_uid, t, 'refunded', 'Trade refunded', 'You missed the ship window, so the buyer was refunded. Your seller bond was returned.');
+  return t;
+}
+
+async function timeoutNuclear(id: string): Promise<Trade> {
+  let noop = false;
+  const t = await repo().runTradeTransition(id, (fresh) => {
+    if (fresh.state !== 'DISPUTED' || !passed(fresh.settlement_deadline)) {
+      noop = true;
+      return { trade: fresh, unchanged: true };
+    }
+    fresh.state = 'NUCLEAR';
+    fresh.updated_at = iso(now());
+    return { trade: fresh, history: { event: 'trade.nuclear', from: 'DISPUTED', to: 'NUCLEAR', actor: 'timeout' } };
+  });
+  if (noop) return t;
+  await enqueuePayoutsForTrade(t); // 50/50 principal split; bonds stay (burned)
+  kickPayouts();
+  await emit(t, 'trade.nuclear', 'DISPUTED', 'NUCLEAR', {});
+  await notify(t.seller_uid, t, 'nuclear', 'Nuclear outcome', 'No settlement was reached. Both bonds were burned and the principal split 50/50.');
+  await notify(t.buyer_uid, t, 'nuclear', 'Nuclear outcome', 'No settlement was reached. Both bonds were burned and the principal split 50/50.');
   return t;
 }
 

@@ -22,6 +22,25 @@ function piSignal(): AbortSignal {
   return AbortSignal.timeout(PI_TIMEOUT_MS);
 }
 
+/**
+ * One retry on NETWORK failure only (fetch rejection/timeout — never on an HTTP
+ * status), so a transient hiccup does not strand a payment mid-approval. Safe
+ * for the calls we use it on: GET is read-only and Pi's approve/complete are
+ * idempotent per payment id (re-approving an approved payment succeeds).
+ */
+async function piFetch(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal: piSignal() });
+  } catch (first) {
+    await new Promise((r) => setTimeout(r, 500));
+    try {
+      return await fetch(url, { ...init, signal: piSignal() });
+    } catch {
+      throw first;
+    }
+  }
+}
+
 function authHeader(): string {
   if (!PI_API_KEY) {
     throw new Error('PI_API_KEY is not configured on the server.');
@@ -64,10 +83,9 @@ export interface PiPayment {
 }
 
 export async function getPayment(paymentId: string): Promise<PiPayment> {
-  const res = await fetch(`${PI_API_BASE}/v2/payments/${paymentId}`, {
+  const res = await piFetch(`${PI_API_BASE}/v2/payments/${paymentId}`, {
     headers: { Authorization: authHeader() },
     cache: 'no-store',
-    signal: piSignal(),
   });
   if (!res.ok) throw new Error(`getPayment failed (${res.status}).`);
   return (await res.json()) as PiPayment;
@@ -79,10 +97,9 @@ export async function getPayment(paymentId: string): Promise<PiPayment> {
  * payment — a common cause of the wallet hanging at "Preparing for a payment".
  */
 export async function getIncompleteServerPayments(): Promise<PiPayment[]> {
-  const res = await fetch(`${PI_API_BASE}/v2/payments/incomplete_server_payments`, {
+  const res = await piFetch(`${PI_API_BASE}/v2/payments/incomplete_server_payments`, {
     headers: { Authorization: authHeader() },
     cache: 'no-store',
-    signal: piSignal(),
   });
   if (!res.ok) throw new Error(`getIncompleteServerPayments failed (${res.status}).`);
   const data = (await res.json()) as { incomplete_server_payments?: PiPayment[] };
@@ -90,10 +107,9 @@ export async function getIncompleteServerPayments(): Promise<PiPayment[]> {
 }
 
 export async function approvePayment(paymentId: string): Promise<void> {
-  const res = await fetch(`${PI_API_BASE}/v2/payments/${paymentId}/approve`, {
+  const res = await piFetch(`${PI_API_BASE}/v2/payments/${paymentId}/approve`, {
     method: 'POST',
     headers: { Authorization: authHeader() },
-    signal: piSignal(),
   });
   if (!res.ok) throw new Error(`approvePayment failed (${res.status}).`);
 }
@@ -102,23 +118,21 @@ export async function completePayment(
   paymentId: string,
   txid: string
 ): Promise<void> {
-  const res = await fetch(`${PI_API_BASE}/v2/payments/${paymentId}/complete`, {
+  const res = await piFetch(`${PI_API_BASE}/v2/payments/${paymentId}/complete`, {
     method: 'POST',
     headers: {
       Authorization: authHeader(),
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ txid }),
-    signal: piSignal(),
   });
   if (!res.ok) throw new Error(`completePayment failed (${res.status}).`);
 }
 
 export async function cancelPayment(paymentId: string): Promise<void> {
-  const res = await fetch(`${PI_API_BASE}/v2/payments/${paymentId}/cancel`, {
+  const res = await piFetch(`${PI_API_BASE}/v2/payments/${paymentId}/cancel`, {
     method: 'POST',
     headers: { Authorization: authHeader() },
-    signal: piSignal(),
   });
   if (!res.ok) throw new Error(`cancelPayment failed (${res.status}).`);
 }

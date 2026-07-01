@@ -1,12 +1,15 @@
 import 'server-only';
-import type { Repo } from './repo';
+import { randomUUID } from 'crypto';
+import type { Repo, TransitionResult } from './repo';
 import { normalizeProfile } from './repo';
 import type {
   Trade, TradeEvent, SettlementProposal, Evidence, AppNotification, Profile,
-  Partner, WebhookDelivery, Rating, Payout,
+  Partner, WebhookDelivery, Rating, Payout, StateHistoryEntry, PaymentIntent,
+  PaymentLog,
 } from '../types';
 import { isTerminal } from '../escrow';
 import { DEFAULT_LIMIT_MICRO } from '../tiers';
+import { TransitionError } from '../errors';
 
 /**
  * In-memory repository. Default when Firebase is not configured. Suitable for a
@@ -24,6 +27,12 @@ export class MemoryRepo implements Repo {
   private deliveries = new Map<string, WebhookDelivery>();
   private ratings: Rating[] = [];
   private payouts = new Map<string, Payout>();
+  private stateHistory: StateHistoryEntry[] = [];
+  private intents = new Map<string, PaymentIntent>();
+  private paymentLogs: PaymentLog[] = [];
+  /** Per-trade promise chain that serializes transitions, mirroring the mutual
+   *  exclusion a Firestore transaction gives the production backend. */
+  private tradeLocks = new Map<string, Promise<unknown>>();
 
   async upsertUser(uid: string, username: string): Promise<Profile> {
     let p = this.profiles.get(uid);
@@ -55,6 +64,38 @@ export class MemoryRepo implements Repo {
     return t ? { ...t } : null;
   }
   async saveTrade(t: Trade) { this.trades.set(t.id, { ...t }); }
+
+  async runTradeTransition(id: string, mutate: (t: Trade) => TransitionResult): Promise<Trade> {
+    const prev = this.tradeLocks.get(id) ?? Promise.resolve();
+    const run = prev.then(() => {
+      const current = this.trades.get(id);
+      if (!current) throw new TransitionError('Trade not found.');
+      const res = mutate({ ...current });
+      if (res.unchanged) return res.trade;
+      this.trades.set(id, { ...res.trade });
+      if (res.history) {
+        this.stateHistory.push({
+          id: randomUUID(),
+          trade_id: id,
+          event: res.history.event,
+          from_state: res.history.from,
+          to_state: res.history.to,
+          actor: res.history.actor,
+          payload: res.history.payload ?? {},
+          at: new Date().toISOString(),
+        });
+      }
+      return res.trade;
+    });
+    // Keep the chain alive whether this transition commits or throws.
+    this.tradeLocks.set(id, run.catch(() => {}));
+    return run;
+  }
+  async listStateHistory(tradeId: string) {
+    return this.stateHistory.filter((h) => h.trade_id === tradeId)
+      .map((h) => ({ ...h }))
+      .sort((a, b) => a.at.localeCompare(b.at));
+  }
   async getTradeByRef(partnerId: string | null, ref: string) {
     for (const t of this.trades.values())
       if (t.ref === ref && t.partner_id === partnerId) return { ...t };
@@ -124,6 +165,20 @@ export class MemoryRepo implements Repo {
     const now = new Date().toISOString();
     for (const n of this.notifications) if (n.uid === uid && !n.read_at) n.read_at = now;
   }
+
+  async upsertPaymentIntent(i: PaymentIntent) { this.intents.set(i.payment_id, { ...i }); }
+  async getPaymentIntent(paymentId: string) {
+    const i = this.intents.get(paymentId);
+    return i ? { ...i } : null;
+  }
+  async listCompletingIntents(olderThanIso: string) {
+    return [...this.intents.values()]
+      .filter((i) => i.status === 'completing' && i.created_at <= olderThanIso)
+      .map((i) => ({ ...i }))
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  }
+
+  async addPaymentLog(l: PaymentLog) { this.paymentLogs.push({ ...l }); }
 
   async addPayout(p: Payout) { this.payouts.set(p.id, { ...p }); }
   async getPayout(id: string) {

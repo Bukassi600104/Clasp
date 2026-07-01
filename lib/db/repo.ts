@@ -1,7 +1,8 @@
 import 'server-only';
 import type {
   Trade, TradeEvent, SettlementProposal, Evidence, AppNotification, Profile,
-  Partner, WebhookDelivery, Rating, Payout,
+  Partner, WebhookDelivery, Rating, Payout, StateHistoryEntry, PaymentIntent,
+  PaymentLog,
 } from '../types';
 import { DEFAULT_LIMIT_MICRO } from '../tiers';
 import { firebaseConfigured } from '../firebase';
@@ -25,6 +26,24 @@ export function normalizeProfile(p: Profile): Profile {
 }
 
 /**
+ * What a state transition produces. `mutate` callbacks passed to
+ * `runTradeTransition` return this; the repo commits trade + history atomically.
+ * `unchanged: true` signals an idempotent replay — nothing is written and the
+ * trade is returned as-is (no duplicate history rows).
+ */
+export interface TransitionResult {
+  trade: Trade;
+  history?: {
+    event: string;
+    from: Trade['state'];
+    to: Trade['state'];
+    actor: string | null;
+    payload?: Record<string, unknown>;
+  };
+  unchanged?: boolean;
+}
+
+/**
  * Persistence interface. Two implementations:
  *  - FirestoreRepo  (production / emulator)
  *  - MemoryRepo     (no-config fallback, also the unit-test backend)
@@ -42,6 +61,16 @@ export interface Repo {
   insertTrade(t: Trade): Promise<void>;
   getTrade(id: string): Promise<Trade | null>;
   saveTrade(t: Trade): Promise<void>;
+  /**
+   * Atomically read-check-mutate a trade. `mutate` receives the freshly read
+   * trade INSIDE the store's transaction; guards run there, so no interleaving
+   * write can invalidate them (double-fund race, timeout-vs-action race).
+   * Throwing inside `mutate` aborts with nothing written. The state_history row
+   * is committed in the same transaction as the trade document. `mutate` must be
+   * synchronous and must not touch the repo.
+   */
+  runTradeTransition(id: string, mutate: (t: Trade) => TransitionResult): Promise<Trade>;
+  listStateHistory(tradeId: string): Promise<StateHistoryEntry[]>;
   getTradeByRef(partnerId: string | null, ref: string): Promise<Trade | null>;
   getTradeByIdempotency(partnerId: string | null, key: string): Promise<Trade | null>;
   listTradesForUser(uid: string): Promise<Trade[]>;
@@ -70,6 +99,14 @@ export interface Repo {
   addNotification(n: AppNotification): Promise<void>;
   listNotifications(uid: string): Promise<AppNotification[]>;
   markNotificationsRead(uid: string): Promise<void>;
+
+  // payment intents (durable U2A completion records, drives auto-reconcile)
+  upsertPaymentIntent(i: PaymentIntent): Promise<void>;
+  getPaymentIntent(paymentId: string): Promise<PaymentIntent | null>;
+  listCompletingIntents(olderThanIso: string): Promise<PaymentIntent[]>;
+
+  // payment logs (append-only verification audit trail)
+  addPaymentLog(l: PaymentLog): Promise<void>;
 
   // payouts (custodial App-to-User settlement)
   addPayout(p: Payout): Promise<void>;
