@@ -7,7 +7,7 @@ import { useAuth } from '@/app/providers';
 import { api } from '@/lib/client-api';
 import type { Trade, TradeEvent, PublicStats, Rating } from '@/lib/types';
 import {
-  isTerminal, bondFor, buyerLockTotal, sellerLockTotal, completedPayout, refundedPayout, nuclearPayout, microToPi,
+  isTerminal, bondFor, feeFor, buyerLockTotal, sellerLockTotal, completedPayout, refundedPayout, nuclearPayout, microToPi, PARAMS,
 } from '@/lib/escrow';
 import { createPayment, isPiBrowser } from '@/lib/pi-client';
 import { formatPi, formatDate } from '@/lib/format';
@@ -422,16 +422,39 @@ function OutcomeCard({ trade, amount }: { trade: Trade; amount: bigint }) {
     );
   }
 
-  // Active trades: show what's locked
+  // Active trades: show what's actually locked right now. The seller's deposit
+  // is bond + commission when the seller is the fee-payer (sellerLockTotal), and
+  // the buyer's deposit is price + bond + commission when the buyer pays it
+  // (buyerLockTotal) — commission is held in escrow, never carved from the
+  // price, so it gets its own line rather than being folded into a bond figure.
+  const fee = feeFor(amount);
+  const sellerUpfront = sellerLockTotal(amount, trade.fee_payer);
+  const buyerUpfront = buyerLockTotal(amount, trade.fee_payer);
+  const fundedTotal = sellerUpfront + buyerUpfront;
+  const currentlyLocked = trade.buyer_uid ? fundedTotal : sellerUpfront;
+
   return (
     <Breakdown title="Locked in the contract">
       <MoneyRow label="Sale price" micro={amount} />
       <div className="hr" />
-      <MoneyRow label="Buyer bond" micro={bond} sub={trade.buyer_uid ? 'Locked' : 'Locks on funding'} />
+      <MoneyRow label={`Buyer bond (${Number(PARAMS.BOND_PCT)}%)`} micro={bond}
+        sub={trade.buyer_uid ? 'Locked' : 'Locks when the buyer funds'} />
       <div className="hr" />
-      <MoneyRow label="Seller bond" micro={bond} sub="Locked at creation" />
+      <MoneyRow label={`Seller bond (${Number(PARAMS.BOND_PCT)}%)`} micro={bond} sub="Locked at creation" />
       <div className="hr" />
-      <MoneyRow label="Total escrowed" micro={trade.buyer_uid ? buyerLockTotal(amount, trade.fee_payer) + bond : bond} emphasis />
+      <MoneyRow label="Platform commission (1.5%)" micro={fee}
+        sub={trade.fee_payer === 'seller'
+          ? 'Paid by the seller — held in escrow until completion'
+          : trade.buyer_uid
+            ? 'Paid by the buyer — held in escrow until completion'
+            : 'The buyer will add this when they fund'} />
+      <div className="hr" />
+      <MoneyRow
+        label={trade.buyer_uid ? 'Total escrowed' : 'Currently locked'}
+        micro={currentlyLocked}
+        emphasis
+        sub={!trade.buyer_uid ? `${formatPi(fundedTotal)} total once the buyer funds` : undefined}
+      />
     </Breakdown>
   );
 }
