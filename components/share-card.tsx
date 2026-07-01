@@ -36,7 +36,7 @@ export function ShareCard({ trade }: { trade: Trade }) {
 
       <button
         onClick={() => sharePayLink('Pay safely via Clasp', message, url)}
-        className="btn bg-brand text-white w-full mt-3 hover:bg-brand-dark"
+        className="btn bg-brand text-brand-ink w-full mt-3 hover:bg-brand-dark shadow-glow"
       >
         <Share width={18} height={18} /> Share payment link
       </button>

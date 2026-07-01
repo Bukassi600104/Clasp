@@ -71,7 +71,7 @@ export function BottomNav() {
           <Link
             href="/create"
             aria-label="Create a safe trade"
-            className="grid place-items-center h-14 w-14 rounded-full bg-brand text-white shadow-fab -translate-y-4 active:scale-95 transition hover:bg-brand-dark"
+            className="grid place-items-center h-14 w-14 rounded-full bg-brand text-brand-ink shadow-fab -translate-y-4 active:scale-95 transition hover:bg-brand-dark"
           >
             <Plus width={26} height={26} strokeWidth={2.4} />
           </Link>
@@ -100,7 +100,7 @@ function Tab({
       <span className="relative">
         <Icon width={23} height={23} strokeWidth={active ? 2.1 : 1.75} />
         {badge > 0 && (
-          <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 grid place-items-center rounded-full bg-danger text-white text-[10px] font-bold tnum">
+          <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 grid place-items-center rounded-full bg-danger text-sink text-[10px] font-bold tnum">
             {badge > 9 ? '9+' : badge}
           </span>
         )}

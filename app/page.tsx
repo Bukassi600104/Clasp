@@ -37,16 +37,16 @@ function Landing() {
   const { signIn, signingIn, error, inPiBrowser } = useAuth();
 
   return (
-    <div className="min-h-[100dvh] flex flex-col">
+    <div className="min-h-[100dvh] flex flex-col hexgrid">
       <div className="px-5 pt-6">
         <Logo />
       </div>
 
       <div className="px-5 pt-10 flex-1">
-        <span className="chip bg-brand-soft text-brand-dark">
+        <span className="chip bg-brand-soft text-brand">
           <Shield width={14} height={14} /> Escrow protected on Pi
         </span>
-        <h1 className="mt-5 font-display text-[34px] leading-[1.08] font-semibold tracking-tight">
+        <h1 className="mt-5 font-display text-[34px] leading-[1.08] font-semibold tracking-tight glow-text">
           Sell anywhere.<br />Get paid safely.
         </h1>
         <p className="mt-4 text-[16px] leading-relaxed text-muted">
@@ -156,7 +156,7 @@ function Dashboard() {
 
       {/* Hero summary — Pi protected in escrow right now */}
       <div className="px-5 pt-5">
-        <div className="card p-5 rounded-3xl bg-sink ring-0 text-white shadow-lift">
+        <div className="card p-5 rounded-3xl bg-sink ring-1 ring-line/70 text-white shadow-lift">
           <div className="flex items-center justify-between">
             <p className="text-[13px] text-white/55">In escrow now</p>
             {successful > 0 && (
@@ -170,8 +170,8 @@ function Dashboard() {
           </p>
           <p className="mt-2 text-[12.5px] text-white/55 leading-relaxed">
             {active.length === 0
-              ? 'Nothing locked right now — funds are only ever held by the contract, never us.'
-              : `${active.length} active trade${active.length === 1 ? '' : 's'} protected by the contract.`}
+              ? 'Nothing locked right now. Funds sit in escrow only while a trade is active.'
+              : `${active.length} active trade${active.length === 1 ? '' : 's'} protected in escrow.`}
           </p>
         </div>
       </div>
@@ -200,7 +200,7 @@ function Dashboard() {
         <Link
           href="/create"
           aria-label="New trade"
-          className="grid place-items-center h-12 w-12 rounded-full bg-brand text-white shadow-fab active:scale-95 transition shrink-0"
+          className="grid place-items-center h-12 w-12 rounded-full bg-brand text-brand-ink shadow-fab active:scale-95 transition shrink-0"
         >
           <Plus width={22} height={22} strokeWidth={2.3} />
         </Link>
@@ -222,9 +222,16 @@ function Dashboard() {
             </div>
           )}
           {trades && recent.length === 0 && (
-            <p className="py-6 text-center text-[14px] text-muted">
-              No trades yet. Tap <span className="font-semibold text-ink">New trade</span> to create your first safe deal.
-            </p>
+            <div className="py-8 text-center">
+              <svg width="120" height="84" viewBox="0 0 120 84" fill="none" aria-hidden className="mx-auto drop-shadow-[0_0_14px_rgba(31,198,255,0.3)]">
+                <path d="M60 4 104 22v22c0 20-18 32-44 34C34 76 16 64 16 44V22z" stroke="#1FC6FF" strokeOpacity="0.5" strokeWidth="2" strokeLinejoin="round" />
+                <path d="M44 42h32M44 52h20" stroke="#1FC6FF" strokeWidth="2" strokeLinecap="round" />
+                <circle cx="60" cy="30" r="6" stroke="#1FC6FF" strokeWidth="2" />
+              </svg>
+              <p className="mt-4 text-[14px] text-muted">
+                No trades yet. Tap <span className="font-semibold text-ink">New trade</span> to create your first safe deal.
+              </p>
+            </div>
           )}
           <ul className="divide-y divide-line">
             {recent.map((t) => (

@@ -10,6 +10,8 @@ import {
   isTerminal, bondFor, feeFor, buyerLockTotal, sellerLockTotal, completedPayout, refundedPayout, nuclearPayout, microToPi, PARAMS,
 } from '@/lib/escrow';
 import { createPayment, isPiBrowser } from '@/lib/pi-client';
+import { useLiveTrade } from '@/lib/use-live-trade';
+import { celebrateCompletion } from '@/lib/confetti';
 import { formatPi, formatDate } from '@/lib/format';
 import { AppBar } from '@/components/chrome';
 import { StateBadge } from '@/components/state-badge';
@@ -53,6 +55,19 @@ export default function TradeDetailPage() {
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Live updates: the SSE stream signals every state change (ship, confirm,
+  // timeout) and the page refetches, so both parties watch the same timeline
+  // move without refreshing.
+  useLiveTrade(id, load);
+
+  // Celebrate a CLEAN completion exactly once per trade for each party.
+  // Disputed settlements, refunds, and nuclear outcomes get no confetti.
+  useEffect(() => {
+    if (!trade || !user) return;
+    const isParty = user.uid === trade.seller_uid || user.uid === trade.buyer_uid;
+    if (isParty && trade.state === 'COMPLETED') celebrateCompletion(trade.id);
+  }, [trade, user]);
 
   // Pop the rating modal the moment a party's own view shows the trade as
   // complete and they haven't rated yet — once per trade per page visit (a
@@ -133,7 +148,7 @@ export default function TradeDetailPage() {
         )}
 
         {/* Hero — dark status card */}
-        <div className="card p-5 rounded-3xl bg-sink ring-0 text-white">
+        <div className="card p-5 rounded-3xl bg-sink ring-1 ring-line/70 text-white">
           <p className="text-[12px] font-semibold uppercase tracking-wider text-white/50">
             {isSeller ? 'You are selling' : isBuyer ? 'You are buying' : 'Trade'}
           </p>
@@ -177,7 +192,7 @@ export default function TradeDetailPage() {
         {trade.state === 'CREATED' && isSeller && trade.seller_bond_paid !== false && <ShareCard trade={trade} />}
 
         {/* Progress */}
-        <Timeline trade={trade} />
+        <Timeline trade={trade} events={events} />
 
         {/* Outcome / breakdown */}
         <OutcomeCard trade={trade} amount={amount} />

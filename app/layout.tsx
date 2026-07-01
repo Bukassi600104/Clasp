@@ -3,6 +3,7 @@ import Script from 'next/script';
 import { Inter, Fraunces, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from './providers';
+import { Splash } from '@/components/splash';
 
 const sans = Inter({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
 const display = Fraunces({
@@ -25,7 +26,7 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
-  themeColor: '#0E7A53',
+  themeColor: '#0A0F16',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -36,6 +37,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Script src="https://sdk.minepi.com/pi-sdk.js" strategy="afterInteractive" />
         <AuthProvider>
           <div className="shell">{children}</div>
+          <Splash />
         </AuthProvider>
       </body>
     </html>

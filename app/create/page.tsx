@@ -194,11 +194,11 @@ export default function CreatePage() {
                   key={o.v}
                   onClick={() => setFeePayer(o.v)}
                   className={`rounded-xl p-3 text-left transition ring-1 ${
-                    active ? 'bg-sink text-white ring-sink' : 'bg-surface text-muted ring-line active:scale-95'
+                    active ? 'bg-brand text-brand-ink ring-brand shadow-glow' : 'bg-surface text-muted ring-line active:scale-95'
                   }`}
                 >
                   <p className="text-[14px] font-semibold">{o.label}</p>
-                  <p className={`text-[12px] mt-0.5 ${active ? 'text-white/70' : 'text-faint'}`}>{o.sub}</p>
+                  <p className={`text-[12px] mt-0.5 ${active ? 'text-brand-ink/70' : 'text-faint'}`}>{o.sub}</p>
                 </button>
               );
             })}
@@ -283,7 +283,7 @@ function WindowPicker({
               onClick={() => onChange(o.s)}
               className={`h-11 rounded-xl text-[13px] font-semibold transition ring-1 ${
                 active
-                  ? 'bg-sink text-white ring-sink'
+                  ? 'bg-brand text-brand-ink ring-brand shadow-glow'
                   : 'bg-surface text-muted ring-line active:scale-95'
               }`}
             >

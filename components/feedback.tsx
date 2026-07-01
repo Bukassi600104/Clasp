@@ -41,8 +41,8 @@ export function FeedbackPicker({
   const opt = (isPos: boolean) => {
     const active = value === isPos;
     const tone = isPos
-      ? (active ? 'bg-brand text-white ring-brand' : 'bg-surface text-brand-dark ring-line')
-      : (active ? 'bg-warn text-white ring-warn' : 'bg-surface text-muted ring-line');
+      ? (active ? 'bg-brand text-brand-ink ring-brand' : 'bg-surface text-brand-dark ring-line')
+      : (active ? 'bg-warn text-sink ring-warn' : 'bg-surface text-muted ring-line');
     const Icon = isPos ? ThumbsUp : ThumbsDown;
     return (
       <button

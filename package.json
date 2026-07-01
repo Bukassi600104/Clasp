@@ -14,6 +14,8 @@
     "verify": "bash scripts/lifecycle.sh && bash scripts/features.sh"
   },
   "dependencies": {
+    "@types/canvas-confetti": "^1.9.0",
+    "canvas-confetti": "^1.9.4",
     "clsx": "2.1.1",
     "firebase-admin": "^13.10.0",
     "next": "14.2.35",

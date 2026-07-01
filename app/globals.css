@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    color-scheme: light;
+    color-scheme: dark;
   }
   html {
     -webkit-tap-highlight-color: transparent;
@@ -20,6 +20,12 @@
     font-variant-numeric: tabular-nums;
     font-feature-settings: 'tnum' 1;
   }
+  /* Every interactive element gets a visible keyboard focus ring */
+  :focus-visible {
+    outline: 2px solid #1FC6FF;
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
 }
 
 @layer components {
@@ -28,7 +34,7 @@
     @apply mx-auto w-full max-w-app min-h-[100dvh] bg-paper relative;
   }
 
-  /* Primary action — solid emerald, no gradient */
+  /* Primary action — solid signal cyan with dark ink text (AA), no gradient */
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-2xl px-5 h-12
            text-[15px] font-semibold tracking-tight transition-all duration-150
@@ -36,27 +42,32 @@
            select-none;
   }
   .btn-primary {
-    @apply btn bg-brand text-white shadow-card hover:bg-brand-dark;
+    @apply btn bg-brand text-brand-ink shadow-glow hover:bg-brand-dark hover:shadow-glow-lg;
   }
   .btn-dark {
-    @apply btn bg-sink text-white hover:bg-ink;
+    @apply btn bg-sink text-ink ring-1 ring-line hover:ring-brand/40;
   }
   .btn-ghost {
-    @apply btn bg-transparent text-ink ring-1 ring-line hover:bg-slate-soft;
+    @apply btn bg-transparent text-ink ring-1 ring-line hover:bg-slate-soft hover:ring-brand/30;
   }
   .btn-danger {
-    @apply btn bg-danger text-white hover:brightness-95;
+    @apply btn bg-danger text-[#210605] hover:brightness-110;
   }
   .btn-sm {
     @apply h-10 px-4 text-sm rounded-xl;
   }
 
   .card {
-    @apply bg-surface rounded-2xl shadow-card ring-1 ring-line/70;
+    @apply bg-surface rounded-2xl shadow-card ring-1 ring-line/80;
+  }
+  /* Interactive card — lifts on hover, presses on tap */
+  .card-i {
+    @apply card transition-all duration-150 hover:ring-brand/30 hover:shadow-lift
+           active:scale-[0.99];
   }
 
   .field {
-    @apply w-full h-12 rounded-xl bg-surface ring-1 ring-line px-4 text-[15px]
+    @apply w-full h-12 rounded-xl bg-sink ring-1 ring-line px-4 text-[15px]
            text-ink placeholder:text-faint outline-none transition
            focus:ring-2 focus:ring-brand;
   }
@@ -73,8 +84,29 @@
   .hr {
     @apply h-px bg-line;
   }
+
+  /* Neon display headline — restrained cyan halo, headlines only */
+  .glow-text {
+    text-shadow: 0 0 22px rgba(31, 198, 255, 0.35), 0 0 60px rgba(31, 198, 255, 0.15);
+  }
+
+  /* Hex ground grid — flat outlined hexagons at whisper opacity (SVG, no image asset) */
+  .hexgrid {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='97' viewBox='0 0 56 97'%3E%3Cg fill='none' stroke='%231FC6FF' stroke-opacity='0.07'%3E%3Cpath d='M28 0.5 55.5 16.25v31.5L28 63.5 0.5 47.75v-31.5z'/%3E%3Cpath d='M28 65.5 55.5 81.25v31.5L28 128.5 0.5 112.75v-31.5z'/%3E%3C/g%3E%3C/svg%3E");
+    background-size: 56px 97px;
+  }
 }
 
 /* Hide scrollbars on horizontal rails while keeping scroll */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Motion is a garnish, never a requirement */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
