@@ -159,7 +159,7 @@ export interface PaymentIntent {
 export interface PaymentLog {
   id: string;
   request_id: string;
-  phase: 'approve' | 'complete' | 'reconcile';
+  phase: 'approve' | 'complete' | 'reconcile' | 'client';
   payment_id: string;
   trade_id: string | null;
   status: string; // e.g. 'ok', 'http_404', 'amount_mismatch', 'error:<msg>'

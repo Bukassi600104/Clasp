@@ -152,11 +152,36 @@ export function createPayment(
             handlers.onError?.(e as Error)
           );
         },
-        onCancel: () => handlers.onCancel?.(),
-        onError: (error) => handlers.onError?.(error),
+        onCancel: (paymentId) => {
+          reportOutcome(paymentId, data, 'cancelled');
+          handlers.onCancel?.();
+        },
+        onError: (error, payment) => {
+          const pid = (payment as { identifier?: string } | undefined)?.identifier ?? 'unknown';
+          reportOutcome(pid, data, 'error', error?.message);
+          handlers.onError?.(error);
+        },
       });
     })
     .catch((e) => handlers.onError?.(e as Error));
+}
+
+/** Persist a client-side payment outcome server-side (fire-and-forget) so an
+ *  abandoned or failed wallet payment is visible in payment_logs, not just in
+ *  the user's browser. */
+function reportOutcome(
+  paymentId: string,
+  data: PiPaymentData,
+  outcome: 'cancelled' | 'error',
+  detail?: string
+): void {
+  const tradeId = typeof data.metadata?.tradeId === 'string' ? data.metadata.tradeId : undefined;
+  void fetch('/api/payments/outcome', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paymentId, tradeId, outcome, detail }),
+  }).catch(() => { /* diagnostics only — never block the payment UX */ });
 }
 
 /** Native Pi share sheet when available, falling back to the Web Share API. */

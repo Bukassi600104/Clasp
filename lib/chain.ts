@@ -22,7 +22,9 @@ import 'server-only';
  */
 
 export const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS ?? null;
-export const PI_RPC_URL = process.env.PI_RPC_URL ?? 'https://api.mainnet.minepi.com/rpc';
+// Default matches the network the app actually runs on today (Pi Testnet);
+// set PI_RPC_URL for mainnet at cutover.
+export const PI_RPC_URL = process.env.PI_RPC_URL ?? 'https://api.testnet.minepi.com/rpc';
 export const PI_TOKEN_SAC = process.env.PI_TOKEN_SAC ?? null;
 
 export function contractConfigured(): boolean {

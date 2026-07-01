@@ -181,35 +181,52 @@ the two curl-based e2e scripts.
 
 ---
 
-## 6. Findings → Phase 2 worklist
+## 6. Findings → Phase 2 worklist (all resolved 2026-07-01)
 
-| # | Severity | Finding | Fix |
+| # | Severity | Finding | Resolution |
 |---|---|---|---|
-| F1 | **High** | e2e scripts don't post the now-mandatory seller bond → suite red; also `features.sh` partner-created trades produce checkouts buyers can't pay (no bond flow for partner sellers) | update scripts to call `/bond`; decide + document partner-trade bond policy |
-| F2 | **High** | No atomic transitions; races (double-fund, timeout-vs-action) can corrupt escrow state; no per-trade state history | run transitions in Firestore transactions (`runTransaction` with state re-check inside), add `state_history` subcollection written in the same transaction |
-| F3 | **High** | Pi-complete succeeds but local record fails → money moved, no trade record; recovery manual | persist a durable `payment_intents` record BEFORE Pi-complete keyed by paymentId (retryable), so reconciliation is automatic |
-| F4 | Medium | Verification attempts not persisted (console only) | log approve/complete attempts to a `payment_logs` collection: request id, payment id, trade id, response status, timestamp |
-| F5 | Medium | Dispute page previews ignore `fee_payer` (dispute/[id]/page.tsx:46-47) | pass `trade.fee_payer` |
-| F6 | Medium | Zero unit tests for money math | add unit tests: 0, dust, floor boundaries (1 π bond floor at ≤10 π, 0.05 π fee floor at ≤3.33 π), max amounts, rounding, payout-solvency invariant (Σ payouts + kept fee = Σ collected) per outcome × fee payer |
-| F7 | Low | `NEXT_PUBLIC_PI_EXPLORER_BASE` dead; explorer URL hardcoded mainnet | wire the env var (testnet default) into the event log link |
-| F8 | Medium | No env startup guard; Memory fallback on serverless silently loses data | fail-fast validator on server bootstrap with a clear message naming each missing/malformed var; refuse Memory fallback when `VERCEL===1` |
-| F9 | Low | No Pi-verification retry with idempotency key | retry getPayment/approve once on network error (approve POST is idempotent server-side because expected-amount check re-runs) |
-| F10 | Info | `.env.example` missing `RATE_LIMIT_DISABLED`, `PI_RPC_URL`, `PI_TOKEN_SAC` | document |
+| F1 | **High** | e2e scripts don't post the now-mandatory seller bond → suite red | ✅ FIXED — scripts post `/bond` where funding follows; new checks: bond-gate rejection, bond step, cancel→reactivate. Partner-trade policy documented: a partner-created trade stays unfundable until its seller opens Clasp and posts the bond (checkout blocks it). Suite: 15+14 = 29 green. |
+| F2 | **High** | No atomic transitions; double-fund and timeout-vs-action races; no per-trade state history | ✅ FIXED — `repo().runTradeTransition` runs guards+mutation inside a Firestore transaction (per-trade lock in MemoryRepo); trade doc + `state_history` row commit together; timeouts re-check inside and no-op on races (store.ts, firestore-repo.ts, memory-repo.ts). |
+| F3 | **High** | Pi-complete succeeds but local record fails → money moved, no trade record | ✅ FIXED — complete route persists a `payment_intents` doc (status `completing`) before acknowledging Pi; `lib/reconcile.ts` replays the idempotent bond/fund transition for anything stuck past 2 minutes; wired into the payouts cron. |
+| F4 | Medium | Verification attempts not persisted | ✅ FIXED — `payment_logs` collection via `lib/payment-audit.ts`: request id, phase (approve/complete/reconcile/client), payment id, trade id, status, detail, timestamp. |
+| F5 | Medium | Dispute previews ignore `fee_payer` | ✅ FIXED — dispute page passes `trade.fee_payer` to both preview functions. |
+| F6 | Medium | Zero unit tests for money math | ✅ FIXED — `tests/money.test.ts` (12 tests, `npm run test:unit`): floors, boundaries, rounding, dust-to-buyer, and the solvency invariant across every outcome × fee payer × 9 amounts. |
+| F7 | Low | Explorer URL hardcoded mainnet; env var dead | ✅ FIXED — event-log link uses `NEXT_PUBLIC_PI_EXPLORER_BASE` (testnet default); `.env.example` updated; dormant `chain.ts` RPC default flipped to testnet. |
+| F8 | Medium | No env startup guard; silent Memory fallback on serverless | ✅ FIXED — `lib/env-guard.ts` runs once from the shared `handler()`: prod fails fast listing every missing/malformed var, and refuses to run on Vercel without Firestore. |
+| F9 | Low | No Pi-verification retry | ✅ FIXED — `piFetch` in pi-server.ts retries once on network failure only (never on HTTP status); approve/complete are idempotent per payment id, request ids correlate the log rows. |
+| F10 | Info | `.env.example` gaps | ✅ FIXED — `RATE_LIMIT_DISABLED`, `PI_RPC_URL`, `PI_TOKEN_SAC` documented. |
+
+Also fixed while in here: the payouts worker (`/api/cron/payouts`) existed but was
+never scheduled in `vercel.json` — escrow releases would have waited for a manual
+admin call forever. Now scheduled daily, plus an opportunistic best-effort drain
+fires immediately after every settlement (`kickPayouts`), with the resumable
+payout cycle making either path safe to kill mid-flight.
 
 ---
 
-## 7. Phase 3 checklist — Pi SDK and Testnet readiness
-
-Verified during this audit; each will be re-confirmed (and gaps closed) in Phase 3.
+## 7. Phase 3 checklist — Pi SDK and Testnet readiness (completed 2026-07-01)
 
 | Item | Status |
 |---|---|
-| 1. Minimal `Pi.authenticate` scopes | ✅ Sign-in requests only `username` (pi-client.ts:92); `payments` is added just-in-time at payment (pi-client.ts:122). `wallet_address` type exists but is never requested. |
-| 2. All `createPayment` callbacks handled | ✅ handled (pi-client.ts:135-148 → both pages); ⚠ outcomes not persisted server-side (F4) — cancel/error only reach client state |
-| 3. `onIncompletePaymentFound` resolved server-side | ✅ pi-client.ts:92-102 + /api/payments/incomplete (complete-if-txid else cancel) |
-| 4. Server routes validate auth before Pi API calls | ✅ session cookie required (`requireSession`) on approve/complete; the session is only minted after `GET /v2/me` verification of the access token (auth/route.ts:38). The brief's literal ask (re-send the Pi access token per request) would add nothing over the signed cookie and would push tokens into more requests; flagged as intentionally different. |
-| 5. Single `NEXT_PUBLIC_PI_SANDBOX` flag, no other hardcoded network refs | ⚠ flag is single (pi-client.ts:53) but explorer link hardcodes `/mainnet/` (F7); chain.ts default RPC is mainnet (dormant) |
-| Pi2Day 2026 releases | To review in Phase 3: **Pi Sign-in** (may replace the polling `window.Pi` detect + enable auth outside Pi Browser), **PiVerify** (KYC attestation could gate high-tier sellers without our own checks), **SoloHost** (self-hosting requirement changes). Flag only, no integration this pass. |
+| 1. Minimal `Pi.authenticate` scopes | ✅ DONE — sign-in requests only `username`; `payments` is added just-in-time at the moment of payment. `wallet_address` is never requested. No change needed. |
+| 2. All `createPayment` callbacks handled and persisted | ✅ DONE — approval/completion outcomes were already persisted via the server routes; cancel/error outcomes now persist too: the SDK wrapper reports them to `POST /api/payments/outcome` (session-gated, rate-limited, diagnostics-only), landing in `payment_logs` with phase `client`. |
+| 3. `onIncompletePaymentFound` resolved server-side | ✅ DONE — both authenticate paths post the stale payment to `/api/payments/incomplete`, which completes it when a txid exists and cancels it otherwise; `createPayment` awaits that reconcile before opening a new payment. |
+| 4. Server routes validate auth before Pi API calls | ✅ DONE (intentionally different mechanism) — every payment route requires the signed session cookie, and a session is only ever minted after the access token passes `GET /v2/me` verification. Re-sending the raw Pi access token per request would spread the token wider for no security gain; documented here as the deliberate design. |
+| 5. Single `NEXT_PUBLIC_PI_SANDBOX` flag, no other hardcoded network refs | ✅ DONE — the flag is the only network-mode switch; the explorer link now uses `NEXT_PUBLIC_PI_EXPLORER_BASE` (testnet default) and the dormant `chain.ts` RPC default now points at testnet. Reminder: this flag selects the desktop dev sandbox, NOT Testnet vs Mainnet — the portal registration does that. |
+
+### Pi2Day 2026 releases — flagged, not integrated (per the brief)
+
+Source: the [official Pi2Day 2026 announcement](https://minepi.com/blog/pi2day2026/)
+(see also [KuCoin's coverage](https://www.kucoin.com/news/flash/pi-network-launches-solohost-pi-sign-in-and-piverify-on-pi2day-2026)).
+
+| Release | What it is | Constraint it could remove for Clasp |
+|---|---|---|
+| **Pi Sign-in** | Pi-account sign-in for third-party apps OUTSIDE the Pi Browser | Today Clasp auth only works inside Pi Browser (the app polls for `window.Pi` and falls back to a sandbox identity). Pi Sign-in could let sellers manage trades from a normal desktop browser — notifications, dispute handling, partner dashboards — with payments still happening in Pi Browser. Biggest practical win of the three. |
+| **PiVerify** | Pi's real-human/KYC verification offered to third-party clients (18M+ verified users) | Seller trust tiers currently derive only from in-app trade history. A PiVerify attestation could gate the higher tiers (or lower bonds for verified sellers) without Clasp running any identity checks itself. |
+| **SoloHost** | Permissionless publishing of Node-based, self-hosted apps on Pi Desktop | Least relevant near-term: Clasp is a hosted web app on Vercel. Worth watching if Pi later privileges SoloHost distribution or offers compute Clasp could use for the indexer. |
+
+No integration in this pass. When Pi Sign-in SDK docs stabilize, it should be the
+first of the three to evaluate.
 
 ---
 

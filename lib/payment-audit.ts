@@ -11,7 +11,7 @@ import { repo } from './db/repo';
  */
 export function logPayment(entry: {
   requestId: string;
-  phase: 'approve' | 'complete' | 'reconcile';
+  phase: 'approve' | 'complete' | 'reconcile' | 'client';
   paymentId: string;
   tradeId?: string | null;
   status: string;
